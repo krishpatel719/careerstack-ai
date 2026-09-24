@@ -6,11 +6,11 @@ returns -- no network, no LLM. The point is discovery.py's own logic
 fixtures keep that reproducible.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models.job import Job
 from app.models.resume import Experience, ParsedResume, Project
 from app.services import discovery
 from app.services.discovery import (
@@ -126,10 +126,55 @@ def test_query_generation_adds_the_parent_role_when_there_is_an_obvious_one():
     assert "software developer" in queries
 
 
+def test_frontend_queries_do_not_widen_to_software_developer():
+    """Frontend must stay frontend. A broad software-developer query is
+    what allowed backend/Java postings into frontend searches.
+    """
+    queries = generate_queries("frontend developer", _resume(["Java", "React"]))
+
+    assert "frontend engineer" in queries
+    assert "software developer" not in queries
+
+
+def test_frontend_source_cache_is_filtered_even_when_it_predates_the_fix(monkeypatch):
+    """Role filtering must happen on cache reads too, not only fresh
+    provider calls, or stale mixed-role cache entries keep surfacing for
+    six hours after deployment.
+    """
+    cached = [
+        {"id": "frontend", "title": "Senior Frontend Engineer"},
+        {"id": "java", "title": "Java Backend Engineer"},
+    ]
+    monkeypatch.setattr(discovery, "_cached_source_postings", lambda *args: cached)
+
+    async def must_not_fetch():
+        raise AssertionError("a cache hit must not hit the provider")
+
+    kept = asyncio.run(discovery._cached_fetch("greenhouse", "frontend developer", "India", must_not_fetch))
+
+    assert [posting["id"] for posting in kept] == ["frontend"]
+
+
 def test_query_generation_has_no_parent_for_an_unknown_role():
     queries = generate_queries("quantum blockchain artisan", _resume())
     assert queries[0] == "quantum blockchain artisan"
     assert all("software" not in query for query in queries)
+
+
+@pytest.mark.anyio
+async def test_cached_fetch_ignores_malformed_top_level_and_mixed_items(monkeypatch):
+    valid = _posting("Backend Developer", "Acme")
+    monkeypatch.setattr(discovery, "_cached_source_postings", lambda *args: None)
+    monkeypatch.setattr(discovery, "_store_source_postings", lambda *args: None)
+
+    async def malformed_fetcher():
+        return [valid, None, "not-an-object", {"title": []}]
+
+    postings = await discovery._cached_fetch(
+        "jsearch", "backend developer", "India", malformed_fetcher
+    )
+
+    assert postings == [valid]
 
 
 # --------------------------------------------------------------------------
@@ -347,12 +392,23 @@ def test_a_thin_posting_is_low_confidence_but_not_unscored():
     assert scored.meta.skills_unscored is False
 
 
-def test_every_job_is_flagged_as_working_from_a_truncated_description():
-    job = normalise_posting(_posting("Backend Developer", "Acme"))
-    scored = score_job(job, "python django", {"Python"}, "Ahmedabad", now=NOW)
+def test_description_truncation_is_carried_from_the_source_through_scoring():
+    adzuna = normalise_posting(_posting("Backend Developer", "Acme"))
+    scored_adzuna = score_job(adzuna, "python django", {"Python"}, "Ahmedabad", now=NOW)
 
-    assert scored.meta.description_truncated is True
-    assert scored.meta.description_chars == len(job.description)
+    assert scored_adzuna.meta.description_truncated is True
+    assert scored_adzuna.meta.description_chars == len(adzuna.description)
+
+    for source in ("jsearch", "greenhouse", "lever", "ashby"):
+        posting = _posting("Backend Developer", f"{source.title()} Co")
+        posting["source"] = source
+        posting["description_truncated"] = False
+        job = normalise_posting(posting)
+        scored = score_job(job, "python django", {"Python"}, "Ahmedabad", now=NOW)
+
+        assert job.meta.description_truncated is False
+        assert scored.meta.description_truncated is False
+        assert scored.meta.description_chars == len(job.description)
 
 
 # --------------------------------------------------------------------------

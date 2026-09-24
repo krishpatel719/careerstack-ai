@@ -90,14 +90,14 @@ def _years_explanation(resume_years: float, required_years_min: float | None) ->
     if not required_years_min:
         return f"{resume_years} years of experience (no market minimum available for this role)."
     if resume_years >= required_years_min:
-        return f"{resume_years} years vs {required_years_min} typically required — meets or exceeds the market bar."
+        return f"{resume_years} years vs {required_years_min} typically required - meets or exceeds the market bar."
     return f"{resume_years} years vs {required_years_min} typically required."
 
 
 def _education_explanation(highest_degree_rank: int | None) -> str:
     need_label = _DEGREE_LABELS[BASELINE_DEGREE_RANK]
     if highest_degree_rank is None:
-        return f"No recognisable degree found on the resume — assumed below the {need_label} baseline."
+        return f"No recognisable degree found on the resume - assumed below the {need_label} baseline."
 
     have_label = _DEGREE_LABELS[highest_degree_rank]
     if highest_degree_rank >= BASELINE_DEGREE_RANK:

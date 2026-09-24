@@ -8,12 +8,15 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.database import close_database, initialize_database
 from app.dependencies import get_current_user
 from app.models.user import UserPublic
+from app.rate_limit import FixedWindowRateLimiter
+from app.routers.account import router as account_router
 from app.routers.auth import router as auth_router
 from app.routers.discovery import router as discovery_router
 from app.services.analyze import (
@@ -27,14 +30,55 @@ from app.store import load_json
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 
 ANALYSES_COLLECTION = "analyses"
 
+REACT_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+REACT_INDEX = REACT_DIST / "index.html"
+
+
+CONTENT_SECURITY_POLICY = "; ".join(
+    (
+        "default-src 'self'",
+        "script-src 'self'",
+        # React/Tailwind and the current interaction layer use inline style
+        # attributes. Executable JavaScript remains restricted to self.
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "worker-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    )
+)
+
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.storage_backend == "mongodb":
+        # Fail startup if Atlas is unreachable or indexes cannot be created;
+        # silently serving an app whose writes will fail is worse than a
+        # clear deployment failure.
+        initialize_database()
+
+    if settings.environment == "production" and settings.demo_mode:
+        logger.warning(
+            "DEMO_MODE is enabled in production. Demo data is not isolated "
+            "from real users; set DEMO_MODE=false before production exposure."
+        )
     if settings.demo_mode:
         print("=" * 64)
         print("  DEMO_MODE IS ON")
@@ -42,10 +86,14 @@ async def lifespan(app: FastAPI):
         print("  cached profiles are served. Run scripts/prep_demo.py first")
         print("  if the profiles you need aren't cached yet.")
         print("=" * 64)
-    yield
+    try:
+        yield
+    finally:
+        close_database()
 
 
-app = FastAPI(title="CareerStack AI — Resume Analysis", lifespan=lifespan)
+app = FastAPI(title="CareerStack AI - Resume Analysis", lifespan=lifespan)
+rate_limiter = FixedWindowRateLimiter()
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,6 +102,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def response_security_policy(request: Request, call_next):
+    """Apply rate limits and transport-independent response hardening."""
+    bucket = None
+    if request.method == "POST" and request.url.path == "/api/auth/register":
+        bucket = "auth_register"
+    elif request.method == "POST" and request.url.path == "/api/auth/login":
+        bucket = "auth_login"
+    elif request.method == "POST" and request.url.path == "/api/analyze":
+        bucket = "resume_analysis"
+    elif request.method == "POST" and request.url.path == "/api/discovery/run":
+        bucket = "discovery_start"
+
+    if bucket:
+        client_ip = request.client.host if request.client else "unknown"
+        result = rate_limiter.check(client_ip, bucket)
+        if not result.allowed:
+            response = JSONResponse(
+                status_code=429,
+                headers={"Retry-After": str(result.retry_after)},
+                content={
+                    "detail": "Too many requests for this action. Please wait and try again."
+                },
+            )
+        else:
+            response = await call_next(request)
+    else:
+        response = await call_next(request)
+
+    for name, value in SECURITY_HEADERS.items():
+        response.headers[name] = value
+    response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+
+    is_api_path = request.url.path == "/api" or request.url.path.startswith("/api/")
+    has_auth = bool(request.headers.get("authorization"))
+    if is_api_path or has_auth:
+        # API data and authentication failures must not remain in browser,
+        # proxy, or shared-cache storage between users.
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.exception_handler(Exception)
@@ -72,6 +162,69 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(auth_router)
 app.include_router(discovery_router)
+app.include_router(account_router)
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return an actionable response for mistyped API routes."""
+    if request.url.path == "/api" or request.url.path.startswith("/api/"):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": (
+                    "API endpoint not found. Use /api/health for service status "
+                    "or /docs for the API reference."
+                )
+            },
+        )
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+
+@app.get("/", include_in_schema=False)
+async def index() -> FileResponse:
+    """Serve the built React product shell."""
+    if not REACT_INDEX.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="The frontend build is missing. Run npm --prefix frontend run build.",
+        )
+    return FileResponse(REACT_INDEX, media_type="text/html")
+
+
+if (REACT_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=REACT_DIST / "assets"), name="react-assets")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_compat() -> FileResponse:
+    """Serve the SVG favicon for browsers that request the legacy path."""
+    return await favicon()
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon() -> FileResponse:
+    """Serve the built product favicon without exposing the whole dist tree."""
+    path = REACT_DIST / "favicon.svg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(path, media_type="image/svg+xml")
+
+
+@app.get("/career-workspace.jpg", include_in_schema=False)
+async def career_workspace_image() -> FileResponse:
+    path = REACT_DIST / "career-workspace.jpg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/resume-review.jpg", include_in_schema=False)
+async def resume_review_image() -> FileResponse:
+    path = REACT_DIST / "resume-review.jpg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @app.get("/api/health")
@@ -110,11 +263,15 @@ async def analyze(
             status_code=400,
             detail=(
                 f"Unsupported file type '{extension or filename}'. "
-                "Upload a PDF or Word document (.pdf, .docx, .doc)."
+                "Upload a PDF or Word document (.pdf, .docx). Legacy .doc files "
+                "must be saved as .docx first."
             ),
         )
 
-    file_bytes = await file.read()
+    # Read at most one byte beyond the limit. UploadFile.read(size) keeps an
+    # oversized request from being materialised in full before rejection; the
+    # reverse proxy should still enforce an equivalent request-body limit.
+    file_bytes = await file.read(MAX_FILE_SIZE_BYTES + 1)
     if len(file_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
             status_code=400,
@@ -148,9 +305,16 @@ async def analyze(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-# Registered last: a mount on "/" matches every path not already claimed
-# by a route above it, so the API routes must be declared first or this
-# would shadow them. check_dir=False since static/index.html (build order
-# step 10) doesn't exist yet -- this only 404s on missing files, it
-# doesn't fail at import time.
-app.mount("/", StaticFiles(directory="static", html=True, check_dir=False), name="static")
+@app.get("/{full_path:path}", include_in_schema=False)
+async def react_spa_fallback(full_path: str, request: Request) -> FileResponse:
+    """Allow React BrowserRouter URLs such as /auth and /app/jobs.
+
+    API routes and legacy backup paths must remain 404s. Only a browser HTML
+    navigation gets the SPA shell; this prevents the fallback from masking
+    API errors or exposing sibling static backups.
+    """
+    if full_path == "api" or full_path.startswith("api/") or full_path.endswith(".bak"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    if REACT_INDEX.exists() and "text/html" in request.headers.get("accept", ""):
+        return FileResponse(REACT_INDEX, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Not Found")

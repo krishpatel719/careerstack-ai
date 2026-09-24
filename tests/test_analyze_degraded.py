@@ -1,6 +1,7 @@
-"""Tests for the degraded-analysis fallback in analyze.py: if role profile
-mining fails entirely, fall back to the most recent cached profile for any
-role rather than 500ing.
+"""Tests for safe role-profile failure handling in analyze.py.
+
+When the requested role/location has no usable market data, analysis must
+fail rather than scoring against an unrelated cached role/location.
 
 Uses a real fixture (blank-page detection aside, extract_text/layout are
 local and network-free) but stubs out get_or_parse and get_or_mine so no
@@ -47,26 +48,52 @@ def _seed_profile(role: str, location: str, postings_sampled: int) -> dict:
     return profile
 
 
-def test_falls_back_to_most_recent_cached_profile_when_mining_fails(monkeypatch):
+def test_live_mode_does_not_fall_back_to_an_unrelated_cached_profile(monkeypatch):
     monkeypatch.setattr(analyze_module, "get_or_parse", lambda file_bytes, text: _stub_resume())
+    monkeypatch.setattr(analyze_module.settings, "demo_mode", False)
 
     async def _mining_failed(role, location):
         raise RuntimeError("simulated mining failure")
 
     monkeypatch.setattr(analyze_module, "get_or_mine", _mining_failed)
-
-    fallback = _seed_profile("some other role", "Delhi", 40)
+    _seed_profile("some other role", "Delhi", 40)
 
     file_bytes = (FIXTURES_DIR / "demo_after.pdf").read_bytes()
-    result = asyncio.run(run_analysis(file_bytes, "demo_after.pdf", "backend developer", "Ahmedabad", "test-user-id"))
+    with pytest.raises(RoleProfileUnavailableError, match="won't score"):
+        asyncio.run(
+            run_analysis(
+                file_bytes,
+                "demo_after.pdf",
+                "backend developer",
+                "Ahmedabad",
+                "test-user-id",
+            )
+        )
 
-    assert result["degraded"] is True
-    assert "some other role" in result["degraded_message"]
-    assert "Delhi" in result["degraded_message"]
-    assert result["role_profile_meta"]["role"] == fallback["role"]
-    assert result["role_profile_meta"]["location"] == fallback["location"]
-    # the analysis still completed and produced real scores, not an error
-    assert isinstance(result["overall_score"], float)
+
+def test_demo_mode_exact_role_miss_does_not_use_another_role(monkeypatch):
+    monkeypatch.setattr(analyze_module, "get_or_parse", lambda file_bytes, text: _stub_resume())
+    monkeypatch.setattr(analyze_module.settings, "demo_mode", True)
+
+    unrelated_profile = _seed_profile("unrelated demo role", "Delhi", 40)
+
+    file_bytes = (FIXTURES_DIR / "demo_after.pdf").read_bytes()
+
+    with pytest.raises(
+        RoleProfileUnavailableError,
+        match="strict demo requested role.*Strict Demo City",
+    ):
+        asyncio.run(
+            run_analysis(
+                file_bytes,
+                "demo_after.pdf",
+                "strict demo requested role",
+                "Strict Demo City",
+                "test-user-id",
+            )
+        )
+
+    assert unrelated_profile["role"] == "unrelated demo role"
 
 
 def test_no_degradation_when_mining_succeeds_normally(monkeypatch):
@@ -98,7 +125,6 @@ def test_raises_role_profile_unavailable_when_nothing_is_cached_anywhere(monkeyp
         raise RuntimeError("simulated mining failure")
 
     monkeypatch.setattr(analyze_module, "get_or_mine", _mining_failed)
-    monkeypatch.setattr(analyze_module, "get_most_recent_cached_profile", lambda: None)
 
     file_bytes = (FIXTURES_DIR / "demo_after.pdf").read_bytes()
 

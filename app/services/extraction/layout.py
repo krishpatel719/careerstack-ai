@@ -15,16 +15,16 @@ from app.services.extraction.text_extract import detect_multicolumn
 HEADER_FOOTER_MARGIN = 0.06  # top/bottom 6% of page height
 
 # Returned for non-PDF input: there's no PyMuPDF/pdfplumber-based layout
-# detection for DOCX in this codebase, so this is a signal-free default
-# rather than a guess. format_score already knows how to treat a None
-# page_count as "not applicable" for reasonable_length.
+# detection for DOCX in this codebase. None means "not inspected" rather
+# than a negative signal, so format checks exclude these properties from
+# their denominators instead of awarding unearned points.
 _NO_SIGNALS_LAYOUT: dict = {
-    "has_images": False,
-    "has_tables": False,
-    "is_multicolumn": False,
+    "has_images": None,
+    "has_tables": None,
+    "is_multicolumn": None,
     "page_count": None,
-    "font_families": [],
-    "text_in_header_footer": False,
+    "font_families": None,
+    "text_in_header_footer": None,
 }
 
 # A real table needs at least this many rows/columns; a single divider

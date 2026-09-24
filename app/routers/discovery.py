@@ -34,7 +34,7 @@ def _public_run(run: dict) -> dict:
         "stats": run["stats"],
         "widened": run["widened"],
         "queries": run.get("queries", []),
-        "jobs": run.get("jobs", []),
+        "jobs": discovery_service.public_jobs(run),
         "error": run.get("error"),
         "created_at": run.get("created_at"),
         "completed_at": run.get("completed_at"),

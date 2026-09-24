@@ -121,6 +121,28 @@ def test_compute_ats_score_structure_and_band():
     assert result["role_profile_meta"]["postings_sampled"] == 40
 
 
+def test_sparse_role_profile_is_marked_low_confidence_without_changing_formula():
+    result = _score_demo_before(["Python", "MySQL", "HTML", "CSS"])
+    quality = result["role_profile_meta"]
+
+    assert quality["sample_quality"] == "normal"
+    assert quality["score_confidence"] == 1.0
+    assert quality["confidence_reasons"] == []
+
+    sparse = {**ROLE_PROFILE, "postings_sampled": 3, "sparse_profile": True}
+    file_bytes = (FIXTURES_DIR / "demo_before.pdf").read_bytes()
+    sparse_result = compute_ats_score(
+        _demo_before_resume(["Python", "MySQL", "HTML", "CSS"]),
+        extract_text(file_bytes, "demo_before.pdf")["text"],
+        layout_signals(file_bytes),
+        sparse,
+    )
+
+    assert sparse_result["role_profile_meta"]["sample_quality"] == "low"
+    assert sparse_result["role_profile_meta"]["score_confidence"] == 0.25
+    assert sparse_result["role_profile_meta"]["confidence_reasons"]
+
+
 def test_action_plan_top_missing_skill_gain_matches_actual_rescored_delta():
     """The number an examiner is most likely to probe: if you follow the
     top missing-skill recommendation, the actual overall_score delta after
@@ -146,11 +168,50 @@ def test_action_plan_top_missing_skill_gain_matches_actual_rescored_delta():
 
     assert abs(actual_delta - predicted_gain) < 1.0
 
+    assert top_item["quantified"] is True
+    assert top_item["requires_verification"] is True
+    assert top_item["action_id"] == "skill:django"
+
     # only the keyword component should have moved
     assert after_result["subscores"]["format"] == before_result["subscores"]["format"]
     assert after_result["subscores"]["semantic"] == before_result["subscores"]["semantic"]
     assert after_result["subscores"]["experience"] == before_result["subscores"]["experience"]
     assert after_result["subscores"]["keyword"] > before_result["subscores"]["keyword"]
+
+
+def test_evidence_actions_are_unquantified_and_do_not_inflate_projection():
+    result = _score_demo_before(["Python", "MySQL", "HTML", "CSS"])
+    result["keyword_detail"] = {"score": 0.0, "matched": [], "missing": []}
+    result["format_detail"] = {**result["format_detail"], "issues": []}
+    result["semantic_detail"]["weakest_requirements"] = [
+        {
+            "requirement": "Demonstrated ability to lead a cross-functional project team",
+            "evidence_strength": 0.1,
+        }
+    ]
+
+    plan = build_action_plan(result)
+    evidence = next(item for item in plan["items"] if item["type"] == "weak_evidence")
+
+    assert evidence["quantified"] is False
+    assert evidence["estimated_gain"] == 0.0
+    assert evidence["requires_verification"] is True
+    assert plan["quantified_gain_under_our_model"] == 0.0
+    assert plan["projected_score_under_our_model"] == result["overall_score"]
+
+
+def test_missing_skill_and_weak_evidence_are_coordinated_not_duplicated():
+    result = _score_demo_before(["Python", "MySQL", "HTML", "CSS"])
+    result["semantic_detail"]["weakest_requirements"] = [
+        {"requirement": "Experience with Django in production", "evidence_strength": 0.1}
+    ]
+
+    plan = build_action_plan(result)
+    django_actions = [item for item in plan["items"] if item["detail"].get("skill") == "django"]
+
+    assert len(django_actions) == 1
+    assert django_actions[0]["type"] == "missing_skill"
+    assert django_actions[0]["action_id"] == "skill:django"
 
 
 def test_action_plan_capped_at_six_items_sorted_by_gain_descending():

@@ -13,7 +13,7 @@ being overwritten.
 import logging
 from datetime import datetime, timezone
 
-from app.store import load_json, save_json
+from app.store import increment_json_field, load_json
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,19 @@ def record_call(source: str, now: datetime | None = None) -> int:
     """
     period = current_period(now)
     key = _key(source, period)
-    record = load_json(COLLECTION, key) or {"source": source, "period": period, "calls": 0}
-    record["calls"] = int(record.get("calls", 0)) + 1
-    record["last_call_at"] = (now or datetime.now(timezone.utc)).isoformat()
-    save_json(COLLECTION, key, record)
-    return record["calls"]
+    called_at = (now or datetime.now(timezone.utc)).isoformat()
+    return increment_json_field(
+        COLLECTION,
+        key,
+        "calls",
+        amount=1,
+        set_fields={
+            "source": source,
+            "period": period,
+            "source_period": f"{source}|{period}",
+            "last_call_at": called_at,
+        },
+    )
 
 
 def has_budget(source: str, limit: int, now: datetime | None = None) -> bool:

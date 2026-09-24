@@ -67,6 +67,21 @@ def _model_appears_cached(model_name: str) -> bool:
 @functools.lru_cache(maxsize=1)
 def _get_model() -> SentenceTransformer:
     model_name = settings.embedding_model
+
+    if settings.demo_mode:
+        try:
+            # DEMO_MODE must be fully offline. Passing local_files_only makes
+            # that a SentenceTransformer/Hugging Face guarantee rather than
+            # relying on the best-effort cache check below.
+            return SentenceTransformer(model_name, local_files_only=True)
+        except Exception as exc:
+            raise RuntimeError(
+                f"DEMO_MODE semantic scoring requires the local SentenceTransformer "
+                f"model '{model_name}', but its assets are unavailable and demo "
+                f"mode does not allow downloads. Cache the model with DEMO_MODE "
+                f"off before enabling demo mode."
+            ) from exc
+
     if not _model_appears_cached(model_name):
         print(f"Downloading embedding model '{model_name}' (~90MB, first run only)...")
     return SentenceTransformer(model_name)

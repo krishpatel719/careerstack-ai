@@ -1,0 +1,4 @@
+{
+  "_comment": "Add only Ashby board tokens whose public API use and terms have been reviewed. Set enabled to false to pause a board without deleting it.",
+  "companies": []
+}

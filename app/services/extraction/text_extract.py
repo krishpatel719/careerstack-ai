@@ -250,21 +250,37 @@ def _extract_docx(file_bytes: bytes, filename: str) -> str:
 def extract_text(file_bytes: bytes, filename: str) -> dict:
     """Extract and clean text from a resume file.
 
-    Dispatches on the file extension: .pdf via PyMuPDF, .docx/.doc via
-    docx2txt. Raises ExtractionError for anything else.
+    Dispatches on the file extension: .pdf via PyMuPDF and .docx via
+    docx2txt. Legacy binary .doc files are rejected explicitly because
+    docx2txt cannot parse them. Parser failures are normalized to
+    ExtractionError so the API can return a useful 422 response rather than
+    leaking a library-specific exception as a 500.
     """
     ext = Path(filename).suffix.lower()
 
-    if ext == ".pdf":
-        raw_text, raw_naive_text, page_count = _extract_pdf(file_bytes)
-        method = "pymupdf"
-    elif ext in (".docx", ".doc"):
-        raw_text = _extract_docx(file_bytes, filename)
-        raw_naive_text = raw_text  # no column layout to reorder in a docx
-        page_count = None
-        method = "docx2txt"
-    else:
+    if ext == ".doc":
+        raise ExtractionError(
+            "Legacy .doc files are not supported. Save the file as .docx and try again."
+        )
+    if ext not in (".pdf", ".docx"):
         raise ExtractionError(f"Unsupported file type: {ext or filename}")
+
+    try:
+        if ext == ".pdf":
+            raw_text, raw_naive_text, page_count = _extract_pdf(file_bytes)
+            method = "pymupdf"
+        else:
+            raw_text = _extract_docx(file_bytes, filename)
+            raw_naive_text = raw_text  # no column layout to reorder in a docx
+            page_count = None
+            method = "docx2txt"
+    except ExtractionError:
+        raise
+    except Exception as exc:
+        file_label = "PDF" if ext == ".pdf" else "DOCX"
+        raise ExtractionError(
+            f"We couldn't read this {file_label} file. It may be corrupt or not a valid {file_label}."
+        ) from exc
 
     text = clean_text(raw_text)
     naive_text = clean_text(raw_naive_text)

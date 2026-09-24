@@ -30,6 +30,252 @@ _SKILL_ALIASES: dict[str, str] = json.loads(
 
 DEFAULT_SKILL_CATEGORY = "technical"
 
+# Provider and public-ATS searches can return only loosely related roles.
+# Scanning those descriptions lets skills from unrelated jobs become ATS
+# recommendations (for example, Java in a frontend profile). Each recognised
+# role family therefore has an explicit, auditable set of title markers.
+# The version invalidates profiles mined before the corresponding rules so
+# old mixed-role data cannot survive the seven-day cache.
+POSTING_TITLE_FILTER_VERSION = 2
+
+
+def _normalise_title_text(value: object) -> str:
+    """Lowercase a role/title and collapse punctuation for phrase checks."""
+    text = re.sub(r"[^\w\s]", " ", str(value or "").lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _contains_marker(text: str, marker: str) -> bool:
+    """Whole-phrase marker check against already-normalised title text."""
+    return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text) is not None
+
+
+# (role markers, accepted posting-title markers). Order matters where role
+# families overlap: a MERN/MEAN request is full stack, not merely generic
+# web, and a frontend request must not accept every software title.
+_ROLE_TITLE_FILTERS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("frontend", "front end"),
+        ("frontend", "front end"),
+    ),
+    (
+        ("full stack", "fullstack", "mern", "mean"),
+        ("full stack", "fullstack", "mern", "mean"),
+    ),
+    (
+        ("backend", "back end"),
+        ("backend", "back end", "server side", "full stack", "fullstack"),
+    ),
+    (
+        ("android", "ios", "mobile", "react native", "flutter", "xamarin"),
+        ("android", "ios", "mobile", "react native", "flutter", "xamarin"),
+    ),
+    (
+        (
+            "data scientist",
+            "data analyst",
+            "data engineer",
+            "data science",
+            "data analytics",
+            "business intelligence",
+            "machine learning",
+            "ml engineer",
+            "artificial intelligence",
+            "ai engineer",
+            "ai ml",
+        ),
+        (
+            "data scientist",
+            "data analyst",
+            "data engineer",
+            "data science",
+            "data analytics",
+            "business intelligence",
+            "machine learning",
+            "ml engineer",
+            "artificial intelligence",
+            "ai engineer",
+            "ai ml",
+            "statistician",
+        ),
+    ),
+    (
+        (
+            "devops",
+            "dev ops",
+            "site reliability",
+            "sre",
+            "cloud engineer",
+            "platform engineer",
+            "infrastructure engineer",
+        ),
+        (
+            "devops",
+            "dev ops",
+            "site reliability",
+            "sre",
+            "cloud engineer",
+            "platform engineer",
+            "infrastructure engineer",
+        ),
+    ),
+    (
+        ("qa", "quality assurance", "quality engineer", "test engineer", "sdet"),
+        (
+            "qa",
+            "quality assurance",
+            "quality engineer",
+            "test engineer",
+            "software test",
+            "sdet",
+            "automation test",
+        ),
+    ),
+    (
+        (
+            "ui ux",
+            "ui designer",
+            "ux designer",
+            "ux researcher",
+            "user researcher",
+            "product designer",
+            "web designer",
+            "user experience",
+            "user interface",
+        ),
+        (
+            "ui ux",
+            "ui designer",
+            "ux designer",
+            "ux researcher",
+            "user researcher",
+            "user experience",
+            "user interface",
+            "product designer",
+            "web designer",
+        ),
+    ),
+    (
+        ("product manager", "product owner", "product management"),
+        ("product manager", "product owner", "product management"),
+    ),
+    (
+        (
+            "cybersecurity",
+            "cyber security",
+            "security engineer",
+            "application security",
+            "appsec",
+            "soc analyst",
+        ),
+        (
+            "cybersecurity",
+            "cyber security",
+            "security engineer",
+            "application security",
+            "appsec",
+            "infosec",
+            "soc analyst",
+        ),
+    ),
+)
+
+
+def _title_markers_for_role(role: object) -> tuple[str, ...] | None:
+    """Accepted title markers for a recognised role family, else None."""
+    normalised = _normalise_title_text(role)
+    for role_markers, title_markers in _ROLE_TITLE_FILTERS:
+        if any(_contains_marker(normalised, marker) for marker in role_markers):
+            return title_markers
+    return None
+
+
+def posting_matches_role(posting: dict, role: str) -> bool:
+    """Whether a posting's title belongs to a recognised target role family.
+
+    Generic roles such as "software engineer" intentionally remain
+    unfiltered: without a specialty in the requested title, classifying one
+    as frontend, backend, or full stack would be guesswork. Explicit role
+    families use the small deterministic table above instead.
+    """
+    accepted_markers = _title_markers_for_role(role)
+    if accepted_markers is None:
+        return True
+
+    title = _normalise_title_text(posting.get("title"))
+    return any(_contains_marker(title, marker) for marker in accepted_markers)
+
+
+class RoleProfileDataUnavailableError(RuntimeError):
+    """Raised when a market search cannot produce a scoreable role profile.
+
+    Adzuna failures and successful zero-result searches both surface as an
+    empty result list. Treating either as a valid profile would let scoring
+    produce a confident role-fit result with no market evidence behind it.
+    """
+
+
+def _positive_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value > 0
+    )
+
+
+def is_usable_role_profile(profile: dict) -> bool:
+    """Whether a profile has enough market data to support role-fit scoring.
+
+    A profile is usable only when it sampled at least one posting and has at
+    least one structurally valid, positive skill-frequency entry. This is
+    intentionally stricter than merely checking that both fields exist: a
+    cached ``{}`` or a zero-valued entry carries no role-market signal.
+    """
+    if not isinstance(profile, dict):
+        return False
+
+    # Profiles created before the current role-family rules existed may
+    # already contain skills mined from unrelated jobs. They cannot be
+    # repaired deterministically after the fact, so invalidate only affected
+    # role families rather than throwing away every older cache.
+    if _title_markers_for_role(profile.get("role")) is not None and (
+        profile.get("posting_title_filter_version") != POSTING_TITLE_FILTER_VERSION
+    ):
+        return False
+
+    if not _positive_number(profile.get("postings_sampled")):
+        return False
+
+    skill_frequencies = profile.get("skill_frequencies")
+    if not isinstance(skill_frequencies, dict):
+        return False
+
+    return any(
+        isinstance(skill, str)
+        and bool(skill.strip())
+        and isinstance(stats, dict)
+        and _positive_number(stats.get("frequency"))
+        and _positive_number(stats.get("count"))
+        for skill, stats in skill_frequencies.items()
+    )
+
+
+def require_usable_role_profile(profile: dict) -> None:
+    """Raise a domain error when a mined/cached profile is not scoreable."""
+    if is_usable_role_profile(profile):
+        return
+
+    role = profile.get("role", "unknown role") if isinstance(profile, dict) else "unknown role"
+    location = (
+        profile.get("location", "unknown location")
+        if isinstance(profile, dict)
+        else "unknown location"
+    )
+    raise RoleProfileDataUnavailableError(
+        f"No usable role market data for role={role!r}, location={location!r}: "
+        "the result contained no postings or no usable skill frequencies."
+    )
+
 
 def skill_category(skill: str) -> str:
     """"technical" or "professional" for a canonical skill name. Defaults
@@ -216,12 +462,18 @@ async def mine_role_profile(role: str, location: str, target_postings: int = 40)
     postings_by_id: dict[str, dict] = {}
     for variant in variants:
         for posting in await search(variant, location, limit=target_postings, country="in"):
+            if not posting_matches_role(posting, role):
+                continue
             posting_id = posting.get("id")
             if posting_id and posting_id not in postings_by_id:
                 postings_by_id[posting_id] = posting
 
     postings = list(postings_by_id.values())[:target_postings]
     total_postings = len(postings)
+    if total_postings == 0:
+        raise RoleProfileDataUnavailableError(
+            f"No job postings were returned for role={role!r}, location={location!r}."
+        )
 
     skill_counts: dict[str, int] = {}
     requirement_sentences: list[str] = []
@@ -255,6 +507,12 @@ async def mine_role_profile(role: str, location: str, target_postings: int = 40)
         sparse_profile = True
         skill_frequencies = _select_skills(skill_counts, total_postings, MIN_SKILL_MENTIONS_SPARSE)
 
+    if not skill_frequencies:
+        raise RoleProfileDataUnavailableError(
+            f"No usable skill frequencies were found in {total_postings} job posting(s) "
+            f"for role={role!r}, location={location!r}."
+        )
+
     median_experience_years = (
         round(statistics.median(required_years), 1) if required_years else 0.0
     )
@@ -268,5 +526,6 @@ async def mine_role_profile(role: str, location: str, target_postings: int = 40)
         "sparse_profile": sparse_profile,
         "requirement_sentences": requirement_sentences,
         "median_experience_years": median_experience_years,
+        "posting_title_filter_version": POSTING_TITLE_FILTER_VERSION,
         "source_ids": [posting.get("id") for posting in postings],
     }

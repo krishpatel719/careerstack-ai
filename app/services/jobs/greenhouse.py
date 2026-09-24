@@ -24,9 +24,9 @@ import re
 from pathlib import Path
 
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.services.jobs.base import raw_posting
+from app.services.jobs.base import id_or_none, raw_posting, text_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +83,28 @@ def load_company_tokens() -> list[str]:
     except (OSError, ValueError) as exc:
         logger.warning("Could not read %s: %s", _COMPANIES_FILE.name, exc)
         return []
-    return [entry["token"] for entry in payload.get("companies", []) if entry.get("token")]
+    if not isinstance(payload, dict):
+        return []
+    entries = payload.get("companies")
+    if not isinstance(entries, list):
+        return []
+    tokens: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        token = text_or_none(entry.get("token"))
+        if token:
+            tokens.append(token)
+    return tokens
 
 
-def clean_description(content: str | None) -> str:
+def clean_description(content: object) -> str:
     """HTML-escaped Greenhouse markup -> plain text.
 
     Unescape first, then strip tags: doing it the other way round leaves
     `&lt;div&gt;` untouched, since it isn't a tag until it's unescaped.
     """
-    if not content:
+    if not isinstance(content, str) or not content:
         return ""
     unescaped = html.unescape(content)
     without_tags = _TAG_RE.sub(" ", unescaped)
@@ -104,7 +116,7 @@ def _location_terms(location: str) -> list[str]:
     return _CITY_ALIASES.get(normalised, [normalised])
 
 
-def matches_location(job_location: str | None, wanted: str) -> bool:
+def matches_location(job_location: object, wanted: str) -> bool:
     """Case-insensitive city match against a board's free-text location.
 
     A country-wide search ("India") matches everything these boards
@@ -112,7 +124,7 @@ def matches_location(job_location: str | None, wanted: str) -> bool:
     known alias of it.
     """
     wanted_normalised = (wanted or "").strip().lower()
-    haystack = (job_location or "").lower()
+    haystack = job_location.lower() if isinstance(job_location, str) else ""
 
     if wanted_normalised in _COUNTRY_WIDE:
         return "india" in haystack
@@ -120,10 +132,24 @@ def matches_location(job_location: str | None, wanted: str) -> bool:
     return any(term and term in haystack for term in _location_terms(wanted_normalised))
 
 
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry only transient board failures.
+
+    A renamed board commonly returns 404 and a revoked/forbidden endpoint
+    returns 401/403. Repeating those requests wastes time and can look like
+    aggressive scraping. Timeouts, connection failures, rate limits, and
+    5xx responses remain retryable.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status in {408, 425, 429} or status >= 500
+    return isinstance(exc, httpx.HTTPError)
+
+
 @retry(
     stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=1, min=1, max=5),
-    retry=retry_if_exception_type(httpx.HTTPError),
+    retry=_is_retryable,
     reraise=True,
 )
 async def _get_board(client: httpx.AsyncClient, token: str) -> list[dict]:
@@ -131,25 +157,42 @@ async def _get_board(client: httpx.AsyncClient, token: str) -> list[dict]:
         BASE_URL.format(token=token), params={"content": "true"}, timeout=REQUEST_TIMEOUT_SECONDS
     )
     response.raise_for_status()
-    return response.json().get("jobs", [])
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list):
+        return []
+    return [job for job in jobs if isinstance(job, dict)]
 
 
 def _normalise(job: dict, company_fallback: str) -> dict:
-    location = (job.get("location") or {}).get("name")
+    raw_location = job.get("location")
+    location = raw_location.get("name") if isinstance(raw_location, dict) else None
+    raw_departments = job.get("departments")
+    departments = raw_departments if isinstance(raw_departments, list) else []
+    department_names = [
+        name
+        for department in departments
+        if isinstance(department, dict)
+        and (name := text_or_none(department.get("name")))
+    ]
     return raw_posting(
         source=SOURCE_NAME,
-        external_id=str(job.get("id")) if job.get("id") is not None else None,
+        external_id=id_or_none(job.get("id")),
         title=job.get("title"),
-        company=job.get("company_name") or company_fallback,
+        company=text_or_none(job.get("company_name")) or company_fallback,
         location=location,
         description=clean_description(job.get("content")),
-        category=", ".join(
-            department.get("name", "") for department in (job.get("departments") or [])
-        )
-        or None,
+        category=", ".join(department_names) or None,
         # Links back to the board itself, as the terms require.
         url=job.get("absolute_url"),
-        created=job.get("first_published") or job.get("updated_at"),
+        created=text_or_none(job.get("first_published")) or text_or_none(
+            job.get("updated_at")
+        ),
     )
 
 
@@ -165,11 +208,19 @@ async def _fetch_one(
             logger.warning("Greenhouse board %r unavailable: %s", token, exc)
             return []
 
-    return [
-        _normalise(job, token)
-        for job in jobs
-        if matches_location((job.get("location") or {}).get("name"), location)
-    ]
+    normalised: list[dict] = []
+    for job in jobs if isinstance(jobs, list) else []:
+        if not isinstance(job, dict):
+            continue
+        raw_location = job.get("location")
+        job_location = raw_location.get("name") if isinstance(raw_location, dict) else None
+        if not matches_location(job_location, location):
+            continue
+        try:
+            normalised.append(_normalise(job, token))
+        except (TypeError, ValueError, AttributeError) as exc:
+            logger.warning("Skipping malformed Greenhouse posting on board %r: %s", token, exc)
+    return normalised
 
 
 async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
@@ -181,9 +232,10 @@ async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
     a "backend developer" search for no good reason.
     """
     tokens = load_company_tokens()
-    if not tokens:
+    if not isinstance(tokens, list) or not tokens:
         logger.warning("No Greenhouse company tokens configured -- source disabled")
         return []
+    tokens = [token for token in tokens if isinstance(token, str) and token]
 
     semaphore = asyncio.Semaphore(CONCURRENCY)
     async with httpx.AsyncClient() as client:
@@ -199,6 +251,9 @@ async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
             # the belt-and-braces case for anything unforeseen.
             logger.warning("Greenhouse board %r raised unexpectedly: %s", token, result)
             continue
-        collected.extend(result)
+        if isinstance(result, list):
+            collected.extend(posting for posting in result if isinstance(posting, dict))
+        else:
+            logger.warning("Greenhouse board %r returned a malformed result", token)
 
     return collected[:limit]

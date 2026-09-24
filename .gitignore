@@ -3,6 +3,7 @@ __pycache__/
 .env
 *.pyc
 .pytest_cache/
+dogfood-output/
 
 # Runtime cache only -- leading slash anchors this to the repo root.
 # Without it the rule also matched app/data/, which holds source files the
