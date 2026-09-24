@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTH_EXPIRED_EVENT,
   api,
+  getJobMap,
   setToken,
 } from "@/lib/api";
 
@@ -61,6 +62,22 @@ describe("api error formatting", () => {
       message: "Something went wrong. Please try again.",
       status: 500,
     });
+  });
+});
+
+describe("job map API", () => {
+  it("encodes only supplied map filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ jobs: [], meta: { count: 0 }, notice: "Approved sources" }, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getJobMap({ role: "frontend developer", location: "Ahmedabad", remote: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/job-map?role=frontend+developer&location=Ahmedabad&remote=true",
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
   });
 });
 

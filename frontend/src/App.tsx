@@ -26,6 +26,9 @@ const DashboardPage = lazy(() =>
 const JobsPage = lazy(() =>
   import("@/pages/JobsPage").then((module) => ({ default: module.JobsPage })),
 );
+const JobMapPage = lazy(() =>
+  import("@/pages/JobMapPage").then((module) => ({ default: module.JobMapPage })),
+);
 const LegalPage = lazy(() =>
   import("@/pages/LegalPage").then((module) => ({ default: module.LegalPage })),
 );
@@ -205,6 +208,16 @@ function App() {
             element={
               user ? (
                 <JobsPage user={user} onSignOut={signOut} />
+              ) : (
+                <Navigate to="/auth" replace />
+              )
+            }
+          />
+          <Route
+            path="/app/jobs/map"
+            element={
+              user ? (
+                <JobMapPage user={user} onSignOut={signOut} />
               ) : (
                 <Navigate to="/auth" replace />
               )

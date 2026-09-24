@@ -6,7 +6,7 @@ deployment's measured concurrency is known; Atlas SRV/TLS settings belong in
 MONGODB_URI. This module owns startup validation, indexes, and shutdown.
 """
 
-from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo import ASCENDING, DESCENDING, GEOSPHERE, MongoClient
 from pymongo.database import Database
 
 from app.config import settings
@@ -78,6 +78,57 @@ INDEXES: dict[str, list[tuple[str, dict]]] = {
             "source_period",
             {"unique": True, "name": "api_quota_source_period_unique"},
         ),
+    ],
+    "job_map_jobs": [
+        (
+            "_expires_at",
+            {
+                "name": "job_map_jobs_expiry",
+                "expireAfterSeconds": 0,
+            },
+        ),
+        (
+            "geo",
+            {
+                "name": "job_map_jobs_geo",
+                "type": GEOSPHERE,
+                "partialFilterExpression": {"geo": {"$exists": True}},
+            },
+        ),
+        (
+            "last_seen_at",
+            {"name": "job_map_jobs_recent", "sort": {"last_seen_at": DESCENDING}},
+        ),
+        (
+            "company_key",
+            {
+                "name": "job_map_jobs_company_recent",
+                "sort": {"company_key": ASCENDING, "last_seen_at": DESCENDING},
+            },
+        ),
+        (
+            "location_key",
+            {
+                "name": "job_map_jobs_location_recent",
+                "sort": {"location_key": ASCENDING, "last_seen_at": DESCENDING},
+            },
+        ),
+    ],
+    "job_map_job_sources": [
+        (
+            "source_key",
+            {"unique": True, "name": "job_map_source_key_unique"},
+        ),
+        ("job_id", {"name": "job_map_sources_job_id"}),
+    ],
+    "job_map_runs": [
+        (
+            "completed_at",
+            {"name": "job_map_runs_recent", "sort": {"completed_at": DESCENDING}},
+        ),
+    ],
+    "job_map_ingestion_locks": [
+        ("lease_until", {"name": "job_map_lock_lease"}),
     ],
 }
 

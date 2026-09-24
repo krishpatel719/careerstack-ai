@@ -29,8 +29,12 @@ export function UploadPage({
 }) {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
-  const [role, setRole] = useState("");
-  const [location, setLocation] = useState("");
+  const [role, setRole] = useState(
+    () => localStorage.getItem("careerstack_last_role") || "",
+  );
+  const [location, setLocation] = useState(
+    () => localStorage.getItem("careerstack_last_location") || "",
+  );
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
@@ -62,7 +66,11 @@ export function UploadPage({
     setBusy(true);
     setError("");
     try {
-      const analysis = await analyzeResume(file, role.trim(), location.trim());
+      const nextRole = role.trim();
+      const nextLocation = location.trim();
+      localStorage.setItem("careerstack_last_role", nextRole);
+      localStorage.setItem("careerstack_last_location", nextLocation);
+      const analysis = await analyzeResume(file, nextRole, nextLocation);
       sessionStorage.setItem("careerstack_analysis", JSON.stringify(analysis));
       navigate("/app");
     } catch (err) {

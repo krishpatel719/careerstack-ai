@@ -7,6 +7,7 @@ import {
   History,
   LayoutDashboard,
   LogOut,
+  MapPinned,
   Menu,
   Plus,
   Settings2,
@@ -206,6 +207,7 @@ export function WorkspaceShell({
   const nav = [
     { to: "/app", label: "Overview", icon: LayoutDashboard },
     { to: "/app/jobs", label: "Matching roles", icon: BriefcaseBusiness },
+    { to: "/app/jobs/map", label: "Job map", icon: MapPinned },
     { to: "/account", label: "Account", icon: Settings2 },
   ];
 

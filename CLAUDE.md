@@ -305,6 +305,25 @@ the top result is a Full Stack Developer matching 5 of 5 named skills, and
 a Greenhouse posting matching 4 of 11 correctly outranks an Adzuna snippet
 matching 2 of 2.
 
+## Persistent job map
+
+`app/services/job_map.py` is a scheduled, MongoDB-backed aggregation layer
+separate from resume-specific discovery. Approved adapters feed
+`scripts/ingest_job_map.py`; the public `/api/job-map` endpoints only read the
+precomputed snapshot and never spend provider quota. The React map lives at
+`/app/jobs/map` and uses MapLibre with OpenFreeMap.
+
+Canonical job identity includes normalized title, company, and location, so
+same-title roles in different cities remain separate. Coordinates come only from
+`app/data/job_map_locations.json`; unknown locations remain queryable but are
+never assigned guessed coordinates. Ingestion uses a Mongo lease, 90-day
+retention, bulk upserts, source provenance, and first/last-seen timestamps.
+Provider failure must not delete previously stored jobs.
+
+Never add direct LinkedIn, Naukri, or Indeed HTML scraping, login automation,
+CAPTCHA bypass, or access-control evasion. Extend the map through approved APIs,
+official ATS boards, or licensed aggregators.
+
 ## Demo safety
 
 Two sample resumes live in tests/fixtures/: one deliberately bad (two-column,

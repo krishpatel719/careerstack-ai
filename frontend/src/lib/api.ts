@@ -65,6 +65,17 @@ export type Analysis = {
   degraded_message?: string | null;
 };
 
+export type OpportunitySearch = {
+  target: { role: string; location: string };
+  requested_location: string;
+  queries: string[];
+  jobs: Job[];
+  stats: Record<string, number>;
+  widened?: { from: string; to: string; reason: string } | null;
+  generated_at: string;
+  notice: string;
+};
+
 export type Job = {
   fingerprint: string;
   source_label: string;
@@ -87,6 +98,42 @@ export type Job = {
     low_confidence: boolean;
     skills_unscored: boolean;
   };
+};
+
+export type MapJob = {
+  job_id: string;
+  title: string;
+  company: string;
+  location: string;
+  city?: string | null;
+  state?: string | null;
+  country: string;
+  location_quality: "curated" | "unmapped";
+  source: string;
+  source_label: string;
+  url?: string | null;
+  description?: string;
+  description_truncated: boolean;
+  is_remote?: boolean | null;
+  employment_type?: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  salary_currency?: string | null;
+  posted_at?: string | null;
+  last_seen_at: string;
+  longitude?: number;
+  latitude?: number;
+};
+
+export type JobMapResponse = {
+  jobs: MapJob[];
+  meta: {
+    count: number;
+    limit: number;
+    mapped: number;
+    last_ingested_at?: string | null;
+  };
+  notice: string;
 };
 
 const TOKEN_KEY = "careerstack_token";
@@ -222,6 +269,31 @@ export async function listAnalyses() {
 
 export async function getAnalysis(id: string) {
   return api<Analysis>(`/api/analyze/${id}`);
+}
+
+export async function searchOpportunities(
+  role: string,
+  location: string,
+  limit = 50,
+) {
+  const params = new URLSearchParams({ role, location, limit: String(limit) });
+  return api<OpportunitySearch>(`/api/opportunities?${params.toString()}`);
+}
+
+export async function getJobMap(filters: {
+  role?: string;
+  location?: string;
+  company?: string;
+  source?: string;
+  remote?: boolean;
+  limit?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return api<JobMapResponse>(`/api/job-map${suffix}`);
 }
 
 export async function startDiscovery(analysisId: string) {

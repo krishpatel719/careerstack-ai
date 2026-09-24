@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Check,
+  CheckCircle2,
   FileText,
   Gauge,
   Search,
@@ -32,12 +33,34 @@ export function DashboardPage({
   onSignOut: () => void;
 }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(getSavedAnalysis);
+  const [completedActions, setCompletedActions] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("careerstack_completed_actions") || "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
     if (analysis)
       sessionStorage.setItem("careerstack_analysis", JSON.stringify(analysis));
   }, [analysis]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "careerstack_completed_actions",
+      JSON.stringify(completedActions),
+    );
+  }, [completedActions]);
+
+  function toggleAction(action: string) {
+    setCompletedActions((current) =>
+      current.includes(action)
+        ? current.filter((item) => item !== action)
+        : [...current, action],
+    );
+  }
 
   if (!analysis)
     return (
@@ -209,19 +232,27 @@ export function DashboardPage({
                 Suggested improvements
               </h2>
             </div>
-            <Badge variant="secondary">{actionItems.length} found</Badge>
+            <Badge variant="secondary">
+              {completedActions.length}/{actionItems.length} done
+            </Badge>
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Ranked by the impact each change is expected to make.
           </p>
           <div className="mt-6 grid gap-3">
             {actionItems.map((item, index) => (
-              <div key={`${item.action}-${index}`} className="action-row">
+              <div
+                key={`${item.action}-${index}`}
+                className={cn(
+                  "action-row",
+                  completedActions.includes(item.action) && "action-row-done",
+                )}
+              >
                 <span className="action-number">
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold leading-6">
+                  <p className="action-row-title text-sm font-semibold leading-6">
                     {item.action}
                   </p>
                   <p className="mt-1 text-xs capitalize text-muted-foreground">
@@ -243,6 +274,15 @@ export function DashboardPage({
                     +{Number(item.estimated_gain ?? 0).toFixed(1)}
                   </span>
                 )}
+                <button
+                  type="button"
+                  className="action-check"
+                  aria-label={`${completedActions.includes(item.action) ? "Mark incomplete" : "Mark complete"}: ${item.action}`}
+                  aria-pressed={completedActions.includes(item.action)}
+                  onClick={() => toggleAction(item.action)}
+                >
+                  <CheckCircle2 className="size-4" />
+                </button>
               </div>
             ))}
             {!actionItems.length && (

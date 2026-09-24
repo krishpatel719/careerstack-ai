@@ -31,11 +31,11 @@ export function LandingPage({
           <div className="hero-grid site-container">
             <div className="hero-copy-block">
               <h1 className="hero-title">
-                Make the evidence impossible to miss.
+                See what this job is asking for.
               </h1>
               <p className="hero-copy">
-                CareerStack reads your resume against the role you are targeting,
-                then gives you the few changes worth making.
+                Upload your resume. We compare it with live postings and show
+                the few changes worth making before you apply.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <button className="button button-primary h-12 px-6" onClick={start}>
@@ -63,29 +63,29 @@ export function LandingPage({
             <div>
               <p className="section-kicker">The problem</p>
               <h2 className="section-title mt-5 max-w-xl">
-                Most resume advice is written for the average candidate.
+                A good resume can still miss the job.
               </h2>
               <p className="section-copy mt-5 max-w-xl">
-                It tells you to add more keywords, keep everything, and trust a
-                number that never explains what changed. That is not useful
-                when you are applying to a specific role in a specific market.
+                The issue is not effort. It is context. Generic advice gives
+                you more words, but it does not show you what this employer is
+                asking for now.
               </p>
             </div>
             <div className="problem-list">
               <PainPoint
                 number="01"
-                title="The score is disconnected"
+                title="A score without context"
                 body="A number tells you what is wrong, not why it matters to this employer or this role."
               />
               <PainPoint
                 number="02"
-                title="The market keeps moving"
+                title="Advice that ignores the market"
                 body="A generic checklist cannot tell you what this job is asking for now."
               />
               <PainPoint
                 number="03"
-                title="The rewrite can become fiction"
-                body="Adding words you have never used can make a resume cleaner and the story less true."
+                title="A cleaner story with no evidence"
+                body="Adding words you have never used can make a resume polished and less true."
               />
             </div>
           </div>
@@ -96,12 +96,12 @@ export function LandingPage({
             <div className="story-copy">
               <p className="section-kicker">Why CareerStack</p>
               <h2 className="section-title mt-5 max-w-2xl">
-                We built for the moment after the upload.
+                The useful work starts after the score.
               </h2>
               <p className="story-lede mt-6">
-                Most tools stop at a score. The hard part is deciding what to
-                do next without pretending to be a recruiter, a parser, or a
-                career coach.
+                Most tools stop when they have a number. We built for the part
+                that comes next: deciding what to change without pretending to
+                be a recruiter, a parser, or a career coach.
               </p>
               <p className="story-body mt-5">
                 CareerStack keeps the scoring deterministic and the
@@ -141,7 +141,7 @@ export function LandingPage({
             <div className="why-heading">
               <p className="section-kicker">The difference</p>
               <h2 className="section-title mt-5 max-w-2xl">
-                Built to help you decide, not just score.
+                Built to help you decide, not chase a number.
               </h2>
             </div>
             <div className="comparison-grid mt-12">
@@ -168,7 +168,7 @@ export function LandingPage({
             <div className="method-heading">
               <p className="section-kicker">Transparent by design</p>
               <h2 className="section-title mt-5 max-w-2xl">
-                The score is useful because you can open it up.
+                You should be able to see the math.
               </h2>
               <p className="section-copy mt-5 max-w-2xl">
                 Four measured signals shape the result. A language model only
@@ -201,7 +201,7 @@ export function LandingPage({
         <section className="workflow-section">
           <div className="site-container">
             <h2 className="section-title max-w-2xl">
-              One focused path from upload to application.
+              Four steps. No career-management system.
             </h2>
             <p className="section-copy mt-5 max-w-2xl">
               Choose a role, understand the evidence, and make the next useful
@@ -241,7 +241,7 @@ export function LandingPage({
             <div className="integrity-copy">
               <p className="section-kicker">A better kind of honest</p>
               <h2 className="section-title max-w-xl">
-                Your resume stays your working document.
+                Keep the document honest.
               </h2>
               <p className="section-copy mt-5 max-w-xl">
                 We use the file to produce your analysis and matching role view.
@@ -274,7 +274,7 @@ export function LandingPage({
         <section className="final-cta">
           <div className="site-container final-cta-inner">
             <h2 className="max-w-3xl font-display text-4xl leading-[1] tracking-[-0.05em] sm:text-6xl">
-              Know what the role needs. Prove what you have done.
+              Ready to read your resume clearly?
             </h2>
             <button className="button button-accent h-12 px-6" onClick={start}>
               Analyse your resume
