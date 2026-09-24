@@ -1,0 +1,14 @@
+{
+  "targets": [
+    {"role": "backend developer", "location": "India", "enabled": true},
+    {"role": "frontend developer", "location": "India", "enabled": true},
+    {"role": "full stack developer", "location": "India", "enabled": true},
+    {"role": "data scientist", "location": "India", "enabled": true},
+    {"role": "devops engineer", "location": "India", "enabled": true},
+    {"role": "qa engineer", "location": "India", "enabled": true},
+    {"role": "android developer", "location": "India", "enabled": true},
+    {"role": "backend developer", "location": "Ahmedabad", "enabled": true},
+    {"role": "frontend developer", "location": "Ahmedabad", "enabled": true},
+    {"role": "full stack developer", "location": "Ahmedabad", "enabled": true}
+  ]
+}

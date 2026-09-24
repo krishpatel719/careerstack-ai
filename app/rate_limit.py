@@ -45,6 +45,8 @@ DEFAULT_LIMITS: Mapping[str, RateLimit] = {
     "auth_login": RateLimit(30, 60),
     "resume_analysis": RateLimit(10, 60),
     "discovery_start": RateLimit(30, 3600),
+    "opportunity_search": RateLimit(20, 3600),
+    "job_map_read": RateLimit(120, 60),
 }
 
 

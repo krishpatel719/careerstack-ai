@@ -1,0 +1,26 @@
+{
+  "locations": [
+    {"key": "in|ahmedabad|gujarat", "city": "Ahmedabad", "state": "Gujarat", "country": "India", "aliases": ["ahmedabad", "amdavad", "ahmedabad, gujarat"], "coordinates": [72.5714, 23.0225]},
+    {"key": "in|surat|gujarat", "city": "Surat", "state": "Gujarat", "country": "India", "aliases": ["surat", "surat, gujarat", "vadtal"], "coordinates": [72.8347, 21.1702]},
+    {"key": "in|vadodara|gujarat", "city": "Vadodara", "state": "Gujarat", "country": "India", "aliases": ["vadodara", "baroda", "vadodara, gujarat"], "coordinates": [73.1912, 22.3072]},
+    {"key": "in|rajkot|gujarat", "city": "Rajkot", "state": "Gujarat", "country": "India", "aliases": ["rajkot", "rajkot, gujarat"], "coordinates": [70.8022, 22.3039]},
+    {"key": "in|gandhinagar|gujarat", "city": "Gandhinagar", "state": "Gujarat", "country": "India", "aliases": ["gandhinagar", "gift city", "gandhinagar, gujarat"], "coordinates": [72.6369, 23.2156]},
+    {"key": "in|pune|maharashtra", "city": "Pune", "state": "Maharashtra", "country": "India", "aliases": ["pune", "pimpri", "pune, maharashtra"], "coordinates": [73.8567, 18.5204]},
+    {"key": "in|mumbai|maharashtra", "city": "Mumbai", "state": "Maharashtra", "country": "India", "aliases": ["mumbai", "bombay", "mumbai, maharashtra"], "coordinates": [72.8777, 19.076]},
+    {"key": "in|nashik|maharashtra", "city": "Nashik", "state": "Maharashtra", "country": "India", "aliases": ["nashik", "nasik", "nashik, maharashtra"], "coordinates": [73.7898, 19.9975]},
+    {"key": "in|bengaluru|karnataka", "city": "Bengaluru", "state": "Karnataka", "country": "India", "aliases": ["bengaluru", "bangalore", "bengaluru, karnataka"], "coordinates": [77.5946, 12.9716]},
+    {"key": "in|hyderabad|telangana", "city": "Hyderabad", "state": "Telangana", "country": "India", "aliases": ["hyderabad", "hyderabad, telangana"], "coordinates": [78.4867, 17.385]},
+    {"key": "in|chennai|tamil nadu", "city": "Chennai", "state": "Tamil Nadu", "country": "India", "aliases": ["chennai", "madras", "chennai, tamil nadu"], "coordinates": [80.2707, 13.0827]},
+    {"key": "in|bengal|west bengal", "city": "Kolkata", "state": "West Bengal", "country": "India", "aliases": ["kolkata", "calcutta", "kolkata, west bengal"], "coordinates": [88.3639, 22.5726]},
+    {"key": "in|delhi|india", "city": "Delhi", "state": "Delhi", "country": "India", "aliases": ["delhi", "new delhi", "ncr", "delhi, india"], "coordinates": [77.1025, 28.7041]},
+    {"key": "in|gurugram|haryana", "city": "Gurugram", "state": "Haryana", "country": "India", "aliases": ["gurugram", "gurgaon", "gurugram, haryana"], "coordinates": [76.8519, 28.4595]},
+    {"key": "in|noida|uttar pradesh", "city": "Noida", "state": "Uttar Pradesh", "country": "India", "aliases": ["noida", "noida, uttar pradesh"], "coordinates": [77.391, 28.4595]},
+    {"key": "in|kochi|kerala", "city": "Kochi", "state": "Kerala", "country": "India", "aliases": ["kochi", "cochin", "ernakulam", "kochi, kerala"], "coordinates": [76.2673, 9.9312]},
+    {"key": "in|coimbatore|tamil nadu", "city": "Coimbatore", "state": "Tamil Nadu", "country": "India", "aliases": ["coimbatore", "coimbatore, tamil nadu"], "coordinates": [77.0266, 11.0168]},
+    {"key": "in|indore|madhya pradesh", "city": "Indore", "state": "Madhya Pradesh", "country": "India", "aliases": ["indore", "indore, madhya pradesh"], "coordinates": [75.8577, 22.7196]},
+    {"key": "in|jaipur|rajasthan", "city": "Jaipur", "state": "Rajasthan", "country": "India", "aliases": ["jaipur", "jaipur, rajasthan"], "coordinates": [75.7878, 26.9124]},
+    {"key": "in|lucknow|uttar pradesh", "city": "Lucknow", "state": "Uttar Pradesh", "country": "India", "aliases": ["lucknow", "lucknow, uttar pradesh"], "coordinates": [80.9462, 26.8467]},
+    {"key": "in|bhubaneswar|odisha", "city": "Bhubaneswar", "state": "Odisha", "country": "India", "aliases": ["bhubaneswar", "bhubaneswar, odisha"], "coordinates": [85.8245, 20.2707]},
+    {"key": "in|nagpur|maharashtra", "city": "Nagpur", "state": "Maharashtra", "country": "India", "aliases": ["nagpur", "nagpur, maharashtra"], "coordinates": [79.0882, 21.1458]}
+  ]
+}

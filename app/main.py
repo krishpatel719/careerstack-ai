@@ -19,6 +19,8 @@ from app.rate_limit import FixedWindowRateLimiter
 from app.routers.account import router as account_router
 from app.routers.auth import router as auth_router
 from app.routers.discovery import router as discovery_router
+from app.routers.job_map import router as job_map_router
+from app.routers.opportunities import router as opportunities_router
 from app.services.analyze import (
     NeedsOcrError,
     RoleProfileUnavailableError,
@@ -116,6 +118,10 @@ async def response_security_policy(request: Request, call_next):
         bucket = "resume_analysis"
     elif request.method == "POST" and request.url.path == "/api/discovery/run":
         bucket = "discovery_start"
+    elif request.url.path == "/api/opportunities":
+        bucket = "opportunity_search"
+    elif request.url.path == "/api/job-map":
+        bucket = "job_map_read"
 
     if bucket:
         client_ip = request.client.host if request.client else "unknown"
@@ -162,6 +168,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(auth_router)
 app.include_router(discovery_router)
+app.include_router(opportunities_router)
+app.include_router(job_map_router)
 app.include_router(account_router)
 
 

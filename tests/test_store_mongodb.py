@@ -140,6 +140,8 @@ def test_mongodb_indexes_match_runtime_access_and_expiry_paths(mongo_backend):
     source_indexes = mongo_backend["job_source_cache"].index_information()
     run_indexes = mongo_backend["discovery_runs"].index_information()
     quota_indexes = mongo_backend["api_quota"].index_information()
+    map_indexes = mongo_backend["job_map_jobs"].index_information()
+    map_source_indexes = mongo_backend["job_map_job_sources"].index_information()
 
     assert user_indexes["users_user_id_unique"]["unique"] is True
     assert user_indexes["users_email_unique"]["unique"] is True
@@ -148,6 +150,9 @@ def test_mongodb_indexes_match_runtime_access_and_expiry_paths(mongo_backend):
     assert source_indexes["job_source_cache_expiry"]["expireAfterSeconds"] == 6 * 60 * 60
     assert "discovery_runs_cached_lookup" in run_indexes
     assert quota_indexes["api_quota_source_period_unique"]["unique"] is True
+    assert map_indexes["job_map_jobs_geo"]["key"] == [("geo", 1)]
+    assert map_indexes["job_map_jobs_expiry"]["expireAfterSeconds"] == 0
+    assert map_source_indexes["job_map_source_key_unique"]["unique"] is True
 
 
 def test_atlas_settings_require_uri_only_for_mongodb_backend():

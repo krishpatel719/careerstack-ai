@@ -215,6 +215,41 @@ transient failures, and link back to the employer's original posting. They
 are not enabled by default because board tokens change and should not be
 guessed.
 
+Authenticated clients can also search a resume-free opportunity feed with:
+
+```text
+GET /api/opportunities?role=backend%20developer&location=Ahmedabad
+```
+
+This uses the same approved source adapters, deduplicates results, widens a
+thin city search to India when necessary, and ranks by freshness/location
+until a resume is attached. It does not scrape Google, LinkedIn, Indeed, or
+Naukri result pages. An authenticated request is rate-limited to protect
+provider quota.
+
+---
+
+## Persistent job map
+
+CareerStack includes a read-only MongoDB job map for approved sources. The web
+request never calls a job provider: a scheduled ingestion command refreshes the
+snapshot, then `/api/job-map` and `/app/jobs/map` read the stored, geocoded jobs.
+
+```bash
+# Preview configured targets without provider/database calls
+python scripts/ingest_job_map.py --dry-run
+
+# Refresh the MongoDB snapshot (requires Atlas and API credentials)
+python scripts/ingest_job_map.py
+```
+
+Run the second command from Vercel Cron, GitHub Actions, or Task Scheduler.
+Targets live in `app/data/job_map_targets.json`; curated city coordinates live
+in `app/data/job_map_locations.json`. The map uses OpenFreeMap with MapLibre.
+It does not scrape LinkedIn, Naukri, or Indeed pages. Jobs are retained for 90
+days after their latest successful observation and external links open on the
+provider's or employer's original posting.
+
 ---
 
 ## Using it
@@ -282,6 +317,7 @@ app/
     jobs/                    Job source adapters (Adzuna, JSearch, Greenhouse,
                               optional Lever and Ashby public ATS sources)
     discovery.py             Job discovery pipeline
+    opportunities.py         Resume-free approved-source opportunity search
     auth.py                  JWT + bcrypt
   data/                      Skill vocabulary and aliases (source, not cache)
   database.py                MongoDB client lifecycle and indexes
@@ -348,7 +384,8 @@ found wrong on real data.
 Python 3.11 · FastAPI · uvicorn · Pydantic v2 · PyMongo · MongoDB Atlas ·
 PyMuPDF · pdfplumber · docx2txt · sentence-transformers
 (all-MiniLM-L6-v2, CPU) · Groq · rapidfuzz · httpx · tenacity · pyjwt ·
-bcrypt · React 19 · TypeScript · Vite · Tailwind CSS v4
+bcrypt · React 19 · TypeScript · Vite · Tailwind CSS v4 · MapLibre ·
+OpenFreeMap
 
 Deliberately not used: LangChain, Docker, Firebase. JSON is the default
 local/demo store; MongoDB Atlas is an optional production backend selected by

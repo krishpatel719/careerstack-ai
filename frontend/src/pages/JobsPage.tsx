@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BriefcaseBusiness,
   ChevronRight,
+  MapPinned,
   MoveUpRight,
   Search,
 } from "lucide-react";
@@ -20,9 +21,11 @@ import {
 import { Progress } from "@/components/ui/progress";
 import {
   getDiscovery,
+  searchOpportunities,
   startDiscovery,
   type Analysis,
   type Job,
+  type OpportunitySearch,
   type User,
 } from "@/lib/api";
 import { getSavedAnalysis } from "@/lib/score";
@@ -37,28 +40,53 @@ export function JobsPage({
   const navigate = useNavigate();
   const [analysis, setAnalysis] = useState<Analysis | null>(getSavedAnalysis);
   const [run, setRun] = useState<{
-    status: string;
+    status?: string;
     jobs: Job[];
-    widened?: boolean;
+    widened?: boolean | { from: string; to: string; reason: string } | null;
     stats?: Record<string, number>;
+    target?: { role: string; location: string };
+    notice?: string;
   } | null>(null);
+  const [opportunityMode, setOpportunityMode] = useState(false);
+  const [opportunityRole, setOpportunityRole] = useState(
+    getSavedAnalysis()?.role || "Backend Developer",
+  );
+  const [opportunityLocation, setOpportunityLocation] = useState(
+    getSavedAnalysis()?.location || "Ahmedabad",
+  );
   const [remote, setRemote] = useState(false);
   const [salary, setSalary] = useState(false);
   const [minScore, setMinScore] = useState(0);
+  const [sortBy, setSortBy] = useState<"match" | "recent">("match");
   const [busy, setBusy] = useState(false);
   const [searchStage, setSearchStage] = useState("Preparing your search");
   const pollGeneration = useRef(0);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Job | null>(null);
+  const locationSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const job of run?.jobs || []) {
+      const location = job.location?.split(",")[0]?.trim() || "Location not listed";
+      counts.set(location, (counts.get(location) || 0) + 1);
+    }
+    return [...counts.entries()].sort((left, right) => right[1] - left[1]);
+  }, [run?.jobs]);
   const filtered = useMemo(
     () =>
-      (run?.jobs || []).filter(
-        (job) =>
-          (!remote || job.is_remote) &&
-          (!salary || job.salary_max) &&
-          job.match_score >= minScore,
-      ),
-    [run, remote, salary, minScore],
+      (run?.jobs || [])
+        .filter(
+          (job) =>
+            (!remote || job.is_remote) &&
+            (!salary || job.salary_max) &&
+            job.match_score >= minScore,
+        )
+        .sort((left, right) =>
+          sortBy === "match"
+            ? right.match_score - left.match_score
+            : new Date(right.posted_at || 0).getTime() -
+              new Date(left.posted_at || 0).getTime(),
+        ),
+    [run, remote, salary, minScore, sortBy],
   );
 
   useEffect(() => {
@@ -69,11 +97,36 @@ export function JobsPage({
     };
   }, []);
 
+  async function exploreMarket() {
+    setBusy(true);
+    setError("");
+    setOpportunityMode(true);
+    setRun(null);
+    setSearchStage("Searching approved job sources");
+    try {
+      const result = await searchOpportunities(
+        opportunityRole,
+        opportunityLocation,
+        50,
+      );
+      setRun(result);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We couldn't search the approved job sources right now.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function discover() {
     if (!analysis) {
       navigate("/upload");
       return;
     }
+    setOpportunityMode(false);
     setBusy(true);
     setRun(null);
     setError("");
@@ -137,18 +190,96 @@ export function JobsPage({
             )}
           </p>
         </div>
-        <Button onClick={discover} disabled={busy || !analysis}>
-          {busy
-            ? "Searching the market…"
-            : run
-              ? "Refresh results"
-              : "Find matching roles"}
-          <Search data-icon="inline-start" />
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {analysis && (
+            <Button onClick={discover} disabled={busy}>
+              {busy && !opportunityMode
+                ? "Searching the market…"
+                : opportunityMode
+                  ? "Match my resume"
+                  : run
+                    ? "Refresh results"
+                    : "Find matching roles"}
+              <Search data-icon="inline-start" />
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => navigate("/app/jobs/map")}
+          >
+            Open job map
+            <MapPinned data-icon="inline-end" />
+          </Button>
+          <Button
+            variant="outline"
+            onClick={exploreMarket}
+            disabled={busy}
+          >
+            {busy && opportunityMode
+              ? "Exploring sources…"
+              : "Explore opportunities"}
+            <ArrowRight data-icon="inline-end" />
+          </Button>
+        </div>
+      </div>
+      <div className="opportunity-search mt-8">
+        <div className="opportunity-search-copy">
+          <p className="section-kicker">Opportunity map</p>
+          <h2>Search the live market, then match later.</h2>
+          <p>
+            Browse approved APIs and official company ATS boards without
+            uploading a resume. We widen thin city searches to India for
+            better coverage.
+          </p>
+        </div>
+        <form
+          className="opportunity-search-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void exploreMarket();
+          }}
+        >
+          <label>
+            <span>Role</span>
+            <input
+              value={opportunityRole}
+              onChange={(event) => setOpportunityRole(event.target.value)}
+              placeholder="e.g. Backend Developer"
+              required
+              minLength={2}
+            />
+          </label>
+          <label>
+            <span>Location</span>
+            <input
+              value={opportunityLocation}
+              onChange={(event) => setOpportunityLocation(event.target.value)}
+              placeholder="e.g. Ahmedabad"
+              required
+              minLength={2}
+            />
+          </label>
+          <Button type="submit" disabled={busy}>
+            Search sources
+            <ArrowRight data-icon="inline-end" />
+          </Button>
+        </form>
       </div>
       {run && (
         <div className="filter-bar mt-8">
           <span className="mr-auto text-sm font-semibold">Refine results</span>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            Sort
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as "match" | "recent")}
+              className="h-8 rounded-md border border-border bg-card px-2 text-xs font-semibold text-foreground"
+              aria-label="Sort job results"
+            >
+              <option value="match">Best match</option>
+              <option value="recent">Most recent</option>
+            </select>
+          </label>
           <FilterCheck checked={remote} onChange={setRemote}>
             Remote only
           </FilterCheck>
@@ -170,6 +301,19 @@ export function JobsPage({
               {minScore}%
             </span>
           </label>
+          {(remote || salary || minScore > 0) && (
+            <button
+              type="button"
+              className="text-xs font-semibold text-accent underline underline-offset-4"
+              onClick={() => {
+                setRemote(false);
+                setSalary(false);
+                setMinScore(0);
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       )}
       {error && (
@@ -201,14 +345,35 @@ export function JobsPage({
               {run.widened ? " · search was widened for better coverage" : ""}
             </p>
             <span className="font-mono text-xs text-muted-foreground">
-              sorted by match
+              {opportunityMode ? "ranked by market freshness" : "sorted by match"}
             </span>
           </div>
+          {opportunityMode && locationSummary.length > 0 && (
+            <div className="opportunity-map mt-4" aria-label="Opportunity locations">
+              <div className="opportunity-map-heading">
+                <div>
+                  <p className="section-kicker">Coverage map</p>
+                  <h2>Where the opportunities are</h2>
+                </div>
+                <span>{run.target?.location || opportunityLocation}</span>
+              </div>
+              <div className="opportunity-location-list">
+                {locationSummary.map(([location, count]) => (
+                  <div className="opportunity-location" key={location}>
+                    <span className="opportunity-location-dot" />
+                    <span>{location}</span>
+                    <strong>{count}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="jobs-list mt-4">
             {filtered.map((job) => (
               <JobCard
                 key={job.fingerprint}
                 job={job}
+                opportunityMode={opportunityMode}
                 onOpen={() => setSelected(job)}
               />
             ))}
@@ -252,7 +417,11 @@ export function JobsPage({
         </div>
       )}
       {selected && (
-        <JobDialog job={selected} onClose={() => setSelected(null)} />
+        <JobDialog
+          job={selected}
+          opportunityMode={opportunityMode}
+          onClose={() => setSelected(null)}
+        />
       )}
     </WorkspaceShell>
   );
@@ -279,7 +448,15 @@ function FilterCheck({
     </label>
   );
 }
-function JobCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
+function JobCard({
+  job,
+  onOpen,
+  opportunityMode = false,
+}: {
+  job: Job;
+  onOpen: () => void;
+  opportunityMode?: boolean;
+}) {
   return (
     <article className="job-card group relative">
       <button
@@ -291,7 +468,7 @@ function JobCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
       <div className="pointer-events-none">
       <div className="job-match">
         <span>{Math.round(job.match_score)}</span>
-        <small>match</small>
+        <small>{opportunityMode ? "market" : "match"}</small>
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
@@ -336,7 +513,15 @@ function JobCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
     </article>
   );
 }
-function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
+function JobDialog({
+  job,
+  onClose,
+  opportunityMode = false,
+}: {
+  job: Job;
+  onClose: () => void;
+  opportunityMode?: boolean;
+}) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl">
@@ -345,12 +530,14 @@ function JobDialog({ job, onClose }: { job: Job; onClose: () => void }) {
           <DialogTitle className="pr-6">{job.title}</DialogTitle>
           <DialogDescription>
             {job.company} · {job.location} · {Math.round(job.match_score)}%
-            match
+            {opportunityMode ? " market score" : " match"}
           </DialogDescription>
         </DialogHeader>
         <div className="job-dialog-score">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Your match</span>
+            <span className="text-sm font-semibold">
+              {opportunityMode ? "Market signal" : "Your match"}
+            </span>
             <span className="font-display text-3xl">
               {Math.round(job.match_score)}
               <span className="text-base text-muted-foreground">/100</span>
