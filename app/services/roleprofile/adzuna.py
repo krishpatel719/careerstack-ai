@@ -75,11 +75,17 @@ async def search(
         )
         return []
 
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        logger.warning("Adzuna returned an unexpected payload shape; ignoring response")
+        return []
+
     results = []
     for job in payload.get("results", []):
-        company = job.get("company") or {}
-        job_location = job.get("location") or {}
-        category = job.get("category") or {}
+        if not isinstance(job, dict):
+            continue
+        company = job.get("company") if isinstance(job.get("company"), dict) else {}
+        job_location = job.get("location") if isinstance(job.get("location"), dict) else {}
+        category = job.get("category") if isinstance(job.get("category"), dict) else {}
         results.append(
             {
                 "id": job.get("id"),

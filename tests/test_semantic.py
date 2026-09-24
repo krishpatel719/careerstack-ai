@@ -8,12 +8,77 @@ relative ordering rather than exact cosine floats, since embedding values
 can shift by tiny amounts across hardware/BLAS backends.
 """
 
+import pytest
+
+import app.services.scoring.semantic as semantic
 from app.services.scoring.semantic import (
+    _get_model,
     _is_usable_requirement,
     _mentions_a_vocab_skill,
     _synthesize_requirement_sentences,
     semantic_score,
 )
+
+
+def test_demo_mode_loads_model_from_local_files_only(monkeypatch):
+    loaded_model = object()
+    calls = []
+
+    def fake_sentence_transformer(*args, **kwargs):
+        calls.append((args, kwargs))
+        return loaded_model
+
+    monkeypatch.setattr(semantic.settings, "demo_mode", True)
+    monkeypatch.setattr(semantic, "SentenceTransformer", fake_sentence_transformer)
+    monkeypatch.setattr(
+        semantic,
+        "_model_appears_cached",
+        lambda _model_name: pytest.fail("demo mode must not probe for a downloadable model"),
+    )
+    _get_model.cache_clear()
+
+    try:
+        assert _get_model() is loaded_model
+    finally:
+        _get_model.cache_clear()
+
+    assert calls == [((semantic.settings.embedding_model,), {"local_files_only": True})]
+
+
+def test_demo_mode_reports_clear_error_when_local_model_is_unavailable(monkeypatch):
+    def missing_local_model(*_args, **_kwargs):
+        raise OSError("model files are not present in the local cache")
+
+    monkeypatch.setattr(semantic.settings, "demo_mode", True)
+    monkeypatch.setattr(semantic, "SentenceTransformer", missing_local_model)
+    _get_model.cache_clear()
+
+    try:
+        with pytest.raises(RuntimeError, match="DEMO_MODE semantic scoring.*does not allow downloads"):
+            _get_model()
+    finally:
+        _get_model.cache_clear()
+
+
+def test_live_mode_preserves_model_download_behavior(monkeypatch):
+    loaded_model = object()
+    calls = []
+
+    def fake_sentence_transformer(*args, **kwargs):
+        calls.append((args, kwargs))
+        return loaded_model
+
+    monkeypatch.setattr(semantic.settings, "demo_mode", False)
+    monkeypatch.setattr(semantic, "SentenceTransformer", fake_sentence_transformer)
+    monkeypatch.setattr(semantic, "_model_appears_cached", lambda _model_name: False)
+    _get_model.cache_clear()
+
+    try:
+        assert _get_model() is loaded_model
+    finally:
+        _get_model.cache_clear()
+
+    assert calls == [((semantic.settings.embedding_model,), {})]
 
 
 def test_is_usable_requirement_filters_truncated_fragments():

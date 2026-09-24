@@ -29,7 +29,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
 from app.services.jobs import quota
-from app.services.jobs.base import raw_posting
+from app.services.jobs.base import number_or_none, raw_posting, text_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -102,12 +102,12 @@ async def _get(params: dict, headers: dict) -> httpx.Response:
         return response
 
 
-def _salary(posting: dict) -> tuple[float | None, float | None, str | None]:
-    minimum = posting.get("job_min_salary")
-    maximum = posting.get("job_max_salary")
+def _salary(posting: dict) -> tuple[float | int | None, float | int | None, str | None]:
+    minimum = number_or_none(posting.get("job_min_salary"))
+    maximum = number_or_none(posting.get("job_max_salary"))
     if minimum is None and maximum is None:
         return None, None, None
-    return minimum, maximum, posting.get("job_salary_currency")
+    return minimum, maximum, text_or_none(posting.get("job_salary_currency"))
 
 
 def _location(posting: dict) -> str | None:
@@ -117,11 +117,11 @@ def _location(posting: dict) -> str | None:
     location rather than None -- discovery's location_fit reads this, and
     an empty string would score it as "somewhere else" rather than unknown.
     """
-    city = posting.get("job_city")
-    state = posting.get("job_state")
+    city = text_or_none(posting.get("job_city"))
+    state = text_or_none(posting.get("job_state"))
     if city and state:
         return f"{city}, {state}"
-    return city or state or posting.get("job_country")
+    return city or state or text_or_none(posting.get("job_country"))
 
 
 def _posted_at(posting: dict) -> str | None:
@@ -129,15 +129,15 @@ def _posted_at(posting: dict) -> str | None:
     explicit UTC offset, so discovery's recency parser doesn't have to
     guess at a naive timestamp.
     """
-    raw = posting.get("job_posted_at_datetime_utc")
+    raw = text_or_none(posting.get("job_posted_at_datetime_utc"))
     if not raw:
         return None
     try:
-        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
         # Hand it back unchanged rather than dropping it; recency_score
         # already treats an unparseable date as "unknown, score the floor".
-        return str(raw)
+        return raw
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.isoformat()
@@ -146,12 +146,19 @@ def _posted_at(posting: dict) -> str | None:
 def _employment_type(posting: dict) -> str | None:
     value = posting.get("job_employment_type")
     if isinstance(value, list):
-        return ", ".join(str(item) for item in value if item) or None
-    return value or None
+        return ", ".join(
+            item for raw_item in value if (item := text_or_none(raw_item))
+        ) or None
+    return text_or_none(value)
 
 
 def _normalise(posting: dict) -> dict:
     salary_min, salary_max, currency = _salary(posting)
+    stated_remote = posting.get("job_is_remote")
+    # Preserve the provider's tri-state. bool(None) used to turn a missing
+    # field into a firm False, preventing discovery's text fallback from
+    # considering an explicitly remote description.
+    is_remote = stated_remote if isinstance(stated_remote, bool) else None
     return raw_posting(
         source=SOURCE_NAME,
         source_label=SOURCE_LABEL,
@@ -163,7 +170,7 @@ def _normalise(posting: dict) -> dict:
         description=posting.get("job_description"),
         category=_employment_type(posting),
         employment_type=_employment_type(posting),
-        is_remote=bool(posting.get("job_is_remote")),
+        is_remote=is_remote,
         url=posting.get("job_apply_link"),
         created=_posted_at(posting),
         salary_min=salary_min,
@@ -222,5 +229,23 @@ async def fetch(role: str, location: str, limit: int = 50) -> list[dict]:
         logger.warning("JSearch returned unparseable JSON for role=%r: %s", role, exc)
         return []
 
-    results = payload.get("data") or []
-    return [_normalise(posting) for posting in results[:limit]]
+    if not isinstance(payload, dict):
+        logger.warning("JSearch returned a malformed payload for role=%r: %s", role, type(payload).__name__)
+        return []
+
+    results = payload.get("data")
+    if not isinstance(results, list):
+        logger.warning("JSearch returned a malformed data collection for role=%r", role)
+        return []
+
+    normalised: list[dict] = []
+    for posting in results[:limit]:
+        if not isinstance(posting, dict) or not text_or_none(posting.get("job_title")):
+            logger.warning("Skipping malformed JSearch posting in role=%r", role)
+            continue
+        try:
+            normalised.append(_normalise(posting))
+        except (TypeError, ValueError, AttributeError) as exc:
+            # One contract change should cost one posting, not the fan-out.
+            logger.warning("Skipping malformed JSearch posting in role=%r: %s", role, exc)
+    return normalised

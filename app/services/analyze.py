@@ -11,12 +11,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.services.extraction.layout import get_layout_signals
 from app.services.extraction.parse_cache import get_or_parse, resume_file_key
 from app.services.extraction.text_extract import extract_text
-from app.services.roleprofile.cache import get_most_recent_cached_profile, get_or_mine
+from app.services.roleprofile.cache import get_or_mine
 from app.services.scoring.ats import build_action_plan, compute_ats_score
-from app.store import list_keys, load_json, save_json
+from app.store import list_records, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ ANALYSES_COLLECTION = "analyses"
 
 NEEDS_OCR_MESSAGE = (
     "We couldn't find any selectable text in this file. Most ATS systems "
-    "can't read it either — export a text-based PDF and try again."
+    "can't read it either - export a text-based PDF and try again."
 )
 
 
@@ -36,20 +37,11 @@ class NeedsOcrError(Exception):
 
 class RoleProfileUnavailableError(Exception):
     """Raised when role profile data can't be obtained for the requested
-    role/location, AND no cached profile exists for any other role or
-    location either -- there is genuinely nothing to fall back to.
-    main.py maps this to a 503.
+    role/location. Analysis must fail rather than score against an unrelated
+    role or location, in both live and demo modes. main.py maps this to a 503.
     """
 
 
-def _degraded_message(requested_role: str, requested_location: str, fallback_profile: dict) -> str:
-    return (
-        f"Live market data for '{requested_role}' in '{requested_location}' wasn't "
-        f"available, so this analysis uses the most recently cached market data instead "
-        f"('{fallback_profile.get('role')}' in '{fallback_profile.get('location')}', "
-        f"sampled {fallback_profile.get('sampled_at')}). Scores may not reflect your "
-        f"specific role or location."
-    )
 
 
 async def run_analysis(file_bytes: bytes, filename: str, role: str, location: str, user_id: str) -> dict:
@@ -63,8 +55,9 @@ async def run_analysis(file_bytes: bytes, filename: str, role: str, location: st
     Can raise: ExtractionError (text_extract.py / llm_parse.py -- bad or
     unparseable file), NeedsOcrError (no selectable text), RuntimeError
     (get_or_parse, only in DEMO_MODE with no cached parse for this exact
-    file), RoleProfileUnavailableError (role profile mining failed and no
-    cached profile exists for any role/location to fall back to either).
+    file), RoleProfileUnavailableError (role profile mining failed or
+    returned no usable market data; no unrelated role/location fallback is
+    accepted in either mode).
     main.py is responsible for turning each of these into a plain-language
     HTTP response.
     """
@@ -85,29 +78,30 @@ async def run_analysis(file_bytes: bytes, filename: str, role: str, location: st
 
     degraded_message = None
     try:
+        # get_or_mine validates both the exact cache entry and any freshly
+        # mined result before returning, so reaching scoring here means the
+        # requested role/location has usable market data.
         role_profile = await get_or_mine(role, location)
     except Exception as exc:
-        # Deliberately broad: "if role profile mining fails entirely" is a
-        # live-demo safety net, not a specific-exception-type contract --
-        # a RuntimeError (DEMO_MODE with nothing cached), a live Adzuna
-        # failure, anything. Never let this be the reason a demo 500s.
         logger.warning(
             "Role profile unavailable for role=%r location=%r (%s) -- "
-            "trying the most recent cached profile for any role instead",
+            "refusing to substitute an unrelated cached profile",
             role,
             location,
             exc,
         )
-        fallback_profile = get_most_recent_cached_profile()
-        if fallback_profile is None:
+        if settings.demo_mode:
             raise RoleProfileUnavailableError(
-                "No role market data is cached yet, for this role/location or any "
-                "other. Run scripts/prep_demo.py, or mine a profile with DEMO_MODE "
-                "off, before analysing a resume."
+                f"No usable role market data is cached for '{role}' in '{location}'. "
+                "Run scripts/prep_demo.py, or mine and cache this role/location "
+                "with DEMO_MODE off, before analysing a resume in demo mode."
             ) from exc
 
-        role_profile = fallback_profile
-        degraded_message = _degraded_message(role, location, fallback_profile)
+        raise RoleProfileUnavailableError(
+            f"No usable role market data is available for '{role}' in '{location}'. "
+            "We won't score a resume against an unrelated role or location. "
+            "Try again when market data is available."
+        ) from exc
 
     ats_result = compute_ats_score(resume, resume_text, layout, role_profile)
     action_plan = build_action_plan(ats_result)
@@ -164,8 +158,7 @@ def list_user_analyses(user_id: str) -> list[dict]:
     overall_score/subscores already use.
     """
     summaries = []
-    for key in list_keys(ANALYSES_COLLECTION):
-        record = load_json(ANALYSES_COLLECTION, key)
+    for record in list_records(ANALYSES_COLLECTION):
         if not record or record.get("user_id") != user_id:
             continue
 

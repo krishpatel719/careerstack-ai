@@ -6,13 +6,11 @@ adapters), and the point is the normalisation, the fan-out resilience and
 the dedupe priority -- not the providers themselves.
 """
 
-import asyncio
-
 import httpx
 import pytest
 
 from app.services import discovery
-from app.services.jobs import adzuna_source, greenhouse, jsearch
+from app.services.jobs import adzuna_source, ashby, greenhouse, jsearch, lever
 from app.services.jobs.base import SOURCE_PRIORITY, raw_posting, source_rank
 
 # --------------------------------------------------------------------------
@@ -21,7 +19,7 @@ from app.services.jobs.base import SOURCE_PRIORITY, raw_posting, source_rank
 
 COMMON_FIELDS = {
     "id", "source", "source_label", "title", "company", "location", "description",
-    "category", "employment_type", "is_remote", "url", "created",
+    "description_truncated", "category", "employment_type", "is_remote", "url", "created",
     "salary_min", "salary_max", "salary_currency",
 }
 
@@ -40,14 +38,66 @@ def test_raw_posting_has_the_common_field_set():
     assert set(posting.keys()) == COMMON_FIELDS
 
 
-def test_source_priority_order_is_jsearch_then_greenhouse_then_adzuna():
-    assert SOURCE_PRIORITY == ["jsearch", "greenhouse", "adzuna"]
-    assert source_rank("jsearch") < source_rank("greenhouse") < source_rank("adzuna")
+def test_source_priority_prefers_full_description_official_sources():
+    assert SOURCE_PRIORITY == ["jsearch", "greenhouse", "lever", "ashby", "adzuna"]
+    assert source_rank("jsearch") < source_rank("greenhouse")
+    assert source_rank("greenhouse") < source_rank("lever")
+    assert source_rank("lever") < source_rank("ashby") < source_rank("adzuna")
 
 
 def test_unknown_source_sorts_last_rather_than_raising():
     assert source_rank("some-future-source") > source_rank("adzuna")
     assert source_rank(None) > source_rank("adzuna")
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.test/jobs/1", "http://example.test/jobs/1", "  https://example.test/job  "],
+)
+def test_raw_posting_keeps_only_absolute_http_urls(url):
+    posting = raw_posting(
+        source="jsearch", external_id="1", title="Dev", company="Acme",
+        location="Pune", description="text", url=url, created=None,
+    )
+    assert posting["url"] == url.strip()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [None, "", "/jobs/1", "//evil.test/jobs/1", "javascript:alert(1)", "data:text/html,bad", "mailto:jobs@example.test"],
+)
+def test_raw_posting_discards_unsafe_or_relative_urls(url):
+    posting = raw_posting(
+        source="jsearch", external_id="1", title="Dev", company="Acme",
+        location="Pune", description="text", url=url, created=None,
+    )
+    assert posting["url"] is None
+
+
+def test_raw_posting_marks_truncation_from_the_source_contract():
+    common = dict(
+        external_id="1", title="Dev", company="Acme", location="Pune",
+        description="text", url="https://example.test/job", created=None,
+    )
+    assert raw_posting(source="adzuna", **common)["description_truncated"] is True
+    assert raw_posting(source="jsearch", **common)["description_truncated"] is False
+    assert raw_posting(source="greenhouse", **common)["description_truncated"] is False
+    assert raw_posting(source="lever", **common)["description_truncated"] is False
+    assert raw_posting(source="ashby", **common)["description_truncated"] is False
+
+
+def test_stored_job_validation_repairs_unsafe_cached_links_and_source_metadata():
+    job = discovery.normalise_stored_job(
+        {
+            "fingerprint": "cached-1",
+            "source": "jsearch",
+            "url": "javascript:alert(1)",
+            "meta": {"description_truncated": True},
+        }
+    )
+
+    assert job.url is None
+    assert job.meta.description_truncated is False
 
 
 # --------------------------------------------------------------------------
@@ -84,6 +134,7 @@ async def test_adzuna_adapter_normalises_to_the_common_schema(monkeypatch):
     assert posting["source"] == "adzuna"
     assert posting["id"] == "123"
     assert posting["title"] == "Backend Developer"
+    assert posting["description_truncated"] is True
     assert posting["salary_currency"] == "INR"
 
 
@@ -156,6 +207,67 @@ async def test_jsearch_adapter_normalises_to_the_common_schema(monkeypatch):
     assert posting["source_label"] == "via JSearch"
     # The reason this source outranks the others.
     assert len(posting["description"]) > 500
+    assert posting["description_truncated"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [None, [], "not-an-object", 42])
+async def test_jsearch_rejects_malformed_top_level_payloads(payload, monkeypatch):
+    monkeypatch.setattr(jsearch.settings, "rapidapi_key", "test-key")
+    monkeypatch.setattr(jsearch.quota, "has_budget", lambda *a, **k: True)
+    monkeypatch.setattr(jsearch.quota, "record_call", lambda *a, **k: 1)
+
+    async def fake_get(params, headers):
+        return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr(jsearch, "_get", fake_get)
+    assert await jsearch.fetch("backend developer", "India") == []
+
+
+@pytest.mark.anyio
+async def test_jsearch_skips_malformed_items_and_keeps_valid_ones(monkeypatch):
+    monkeypatch.setattr(jsearch.settings, "rapidapi_key", "test-key")
+    monkeypatch.setattr(jsearch.quota, "has_budget", lambda *a, **k: True)
+    monkeypatch.setattr(jsearch.quota, "record_call", lambda *a, **k: 1)
+
+    malformed = {
+        "job_id": [],
+        "job_title": {},
+        "employer_name": [],
+        "job_city": {},
+        "job_state": [],
+        "job_country": 42,
+        "job_description": {},
+        "job_apply_link": [],
+        "job_posted_at_datetime_utc": {},
+        "job_min_salary": {},
+        "job_max_salary": [],
+        "job_salary_currency": {},
+        "job_employment_type": [{}, 3],
+        "job_is_remote": "false",
+    }
+    payload = {"data": [malformed, None, "not-an-object", JSEARCH_PAYLOAD["data"][0]]}
+
+    async def fake_get(params, headers):
+        return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr(jsearch, "_get", fake_get)
+    postings = await jsearch.fetch("backend developer", "Bengaluru")
+
+    assert len(postings) == 1
+    assert postings[0]["source"] == "jsearch"
+    assert postings[0]["source_label"] == "via JSearch"
+    assert postings[0]["title"] == "Senior Backend Engineer"
+    assert postings[0]["description_truncated"] is False
+
+
+def test_jsearch_preserves_a_missing_remote_flag_as_unknown():
+    posting = dict(JSEARCH_PAYLOAD["data"][0])
+    posting.pop("job_is_remote")
+
+    normalised = jsearch._normalise(posting)
+
+    assert normalised["is_remote"] is None
 
 
 @pytest.mark.anyio
@@ -191,6 +303,22 @@ async def test_jsearch_rate_limit_returns_empty_rather_than_raising(monkeypatch)
 # --------------------------------------------------------------------------
 # Greenhouse adapter
 # --------------------------------------------------------------------------
+
+
+def test_greenhouse_retries_only_transient_http_failures():
+    def status_error(status):
+        return httpx.HTTPStatusError(
+            str(status),
+            request=httpx.Request("GET", "https://boards-api.greenhouse.io/"),
+            response=httpx.Response(status),
+        )
+
+    assert greenhouse._is_retryable(status_error(404)) is False
+    assert greenhouse._is_retryable(status_error(401)) is False
+    assert greenhouse._is_retryable(status_error(403)) is False
+    assert greenhouse._is_retryable(status_error(429)) is True
+    assert greenhouse._is_retryable(status_error(503)) is True
+    assert greenhouse._is_retryable(httpx.ReadTimeout("timed out")) is True
 
 
 def test_greenhouse_unescapes_and_strips_html_from_descriptions():
@@ -282,6 +410,7 @@ async def test_greenhouse_adapter_normalises_and_filters_by_location(monkeypatch
     assert posting["source"] == "greenhouse"
     assert posting["title"] == "Backend Engineer"
     assert "We use Python and Django." in posting["description"]
+    assert posting["description_truncated"] is False
     # Terms compliance: links back to the board.
     assert posting["url"].startswith("https://job-boards.greenhouse.io/")
 
@@ -319,12 +448,274 @@ def test_every_shipped_greenhouse_token_is_a_nonempty_string():
 
 
 # --------------------------------------------------------------------------
-# Fan-out and dedupe priority
+# Public ATS adapters
 # --------------------------------------------------------------------------
 
 
-def _stub_sources(monkeypatch, adzuna=None, jsearch_result=None, greenhouse_result=None,
-                  adzuna_raises=False, greenhouse_raises=False):
+@pytest.mark.anyio
+async def test_lever_adapter_normalises_official_public_board_payload(monkeypatch):
+    monkeypatch.setattr(lever, "load_company_tokens", lambda: ["acme"])
+
+    async def fake_get_board(client, token):
+        assert token == "acme"
+        return [
+            {
+                "id": "lever-123",
+                "text": "Backend Engineer",
+                "hostedUrl": "https://jobs.lever.co/acme/lever-123",
+                "createdAt": 1760000000000,
+                "categories": {
+                    "team": "Acme",
+                    "location": "Bengaluru, India",
+                    "department": "Engineering",
+                    "commitment": "Full-time",
+                },
+                "description": "<p>Build Python APIs.</p>",
+            }
+        ]
+
+    monkeypatch.setattr(lever, "_get_board", fake_get_board)
+    postings = await lever.fetch("backend developer", "Bangalore")
+
+    assert len(postings) == 1
+    posting = postings[0]
+    assert set(posting.keys()) == COMMON_FIELDS
+    assert posting["source"] == "lever"
+    assert posting["source_label"] == "via Lever"
+    assert posting["description"] == "Build Python APIs."
+    assert posting["description_truncated"] is False
+    assert posting["created"].endswith("+00:00")
+
+
+@pytest.mark.anyio
+async def test_ashby_adapter_normalises_official_public_board_payload(monkeypatch):
+    monkeypatch.setattr(ashby, "load_company_tokens", lambda: ["acme"])
+
+    async def fake_get_board(client, token):
+        assert token == "acme"
+        return [
+            {
+                "id": "ashby-123",
+                "title": "Python Developer",
+                "companyName": "Acme",
+                "location": "Pune, India",
+                "descriptionHtml": "<div>Use FastAPI.</div>",
+                "jobUrl": "https://jobs.ashbyhq.com/acme/ashby-123",
+                "publishedAt": "2026-09-20T10:00:00Z",
+                "employmentType": "Full-time",
+                "isRemote": False,
+            }
+        ]
+
+    monkeypatch.setattr(ashby, "_get_board", fake_get_board)
+    postings = await ashby.fetch("python developer", "Pune")
+
+    assert len(postings) == 1
+    posting = postings[0]
+    assert set(posting.keys()) == COMMON_FIELDS
+    assert posting["source"] == "ashby"
+    assert posting["source_label"] == "via Ashby"
+    assert posting["description"] == "Use FastAPI."
+    assert posting["description_truncated"] is False
+    assert posting["is_remote"] is False
+
+
+def test_public_ats_company_files_load_only_unique_enabled_tokens():
+    for tokens in (lever.load_company_tokens(), ashby.load_company_tokens()):
+        assert all(isinstance(token, str) and token for token in tokens)
+        assert len(tokens) == len(set(tokens))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("module", [lever, ashby])
+async def test_empty_public_ats_config_disables_source_without_network(module, monkeypatch):
+    async def exploding_get_board(client, token):
+        raise AssertionError("an empty curated config must make no provider call")
+
+    monkeypatch.setattr(module, "_get_board", exploding_get_board)
+
+    assert await module.fetch("backend developer", "India") == []
+
+
+class _ShapeResponseClient:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def get(self, *args, **kwargs):
+        request = httpx.Request("GET", "https://provider.test/board")
+        if self.payload is None:
+            return httpx.Response(200, content=b"null", request=request)
+        return httpx.Response(200, json=self.payload, request=request)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("module", "payload"),
+    [
+        (lever, {"unexpected": "not-a-list"}),
+        (lever, [None, "not-an-object"]),
+        (ashby, {"jobs": "not-a-list"}),
+        (ashby, {"jobs": [None, "not-an-object"]}),
+    ],
+)
+async def test_public_ats_get_board_rejects_malformed_payload_shapes(module, payload):
+    assert await module._get_board(_ShapeResponseClient(payload), "acme") == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [None, [], "not-an-object", 42])
+async def test_greenhouse_rejects_malformed_top_level_payloads(payload):
+    assert await greenhouse._get_board(_ShapeResponseClient(payload), "acme") == []
+
+
+@pytest.mark.anyio
+async def test_greenhouse_skips_malformed_items_and_nested_fields(monkeypatch):
+    monkeypatch.setattr(greenhouse, "load_company_tokens", lambda: ["acme"])
+    malformed_but_located = {
+        "id": {},
+        "title": [],
+        "location": {"name": "Pune, India"},
+        "content": {"unexpected": "shape"},
+        "absolute_url": [],
+        "company_name": {},
+        "departments": [{"name": []}, None, {"name": "Engineering"}],
+        "first_published": {},
+    }
+    valid = dict(GREENHOUSE_PAYLOAD["jobs"][0])
+    valid["id"] = "greenhouse-valid"
+    valid["location"] = {"name": "Pune, India"}
+
+    async def fake_get_board(client, token):
+        return [malformed_but_located, None, "not-an-object", valid]
+
+    monkeypatch.setattr(greenhouse, "_get_board", fake_get_board)
+    postings = await greenhouse.fetch("backend developer", "Pune")
+
+    assert len(postings) == 2
+    malformed_result, valid_result = postings
+    assert malformed_result["source"] == "greenhouse"
+    assert malformed_result["id"] is None
+    assert malformed_result["title"] is None
+    assert malformed_result["description"] == ""
+    assert malformed_result["company"] == "acme"
+    assert malformed_result["description_truncated"] is False
+    assert valid_result["id"] == "greenhouse-valid"
+    assert valid_result["title"] == "Backend Engineer"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("module", "job"),
+    [
+        (
+            lever,
+            {
+                "id": {},
+                "text": [],
+                "categories": {
+                    "location": "Pune, India",
+                    "team": [],
+                    "department": {},
+                    "commitment": 123,
+                },
+                "description": {"unexpected": "shape"},
+                "hostedUrl": 123,
+                "createdAt": "not-an-epoch",
+            },
+        ),
+        (
+            ashby,
+            {
+                "id": {},
+                "title": [],
+                "companyName": {},
+                "location": "Pune, India",
+                "descriptionHtml": 123,
+                "jobUrl": [],
+                "publishedAt": {},
+                "isRemote": "false",
+            },
+        ),
+    ],
+)
+async def test_public_ats_adapter_never_raises_on_malformed_posting_fields(
+    module, job, monkeypatch
+):
+    monkeypatch.setattr(module, "load_company_tokens", lambda: ["acme"])
+
+    async def fake_get_board(client, token):
+        return [job]
+
+    monkeypatch.setattr(module, "_get_board", fake_get_board)
+    postings = await module.fetch("backend developer", "Pune")
+
+    # A posting that still has a usable location is retained with optional
+    # malformed fields coerced to their unknown values; it never escapes as
+    # a list/dict where the common schema promises text or None.
+    assert len(postings) == 1
+    assert set(postings[0]) == COMMON_FIELDS
+    posting = postings[0]
+    assert posting["description"] == ""
+    assert all(
+        posting[key] is None
+        for key in {"id", "title", "category", "employment_type", "created"}
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("module", "job"),
+    [
+        (
+            lever,
+            {
+                "id": "lever-live",
+                "text": "Backend Engineer",
+                "categories": {"location": "Pune, India"},
+                "description": "Full Lever description.",
+            },
+        ),
+        (
+            ashby,
+            {
+                "id": "ashby-live",
+                "title": "Backend Engineer",
+                "location": "Pune, India",
+                "descriptionHtml": "Full Ashby description.",
+            },
+        ),
+    ],
+)
+async def test_one_failing_public_ats_board_does_not_kill_healthy_board(
+    module, job, monkeypatch
+):
+    monkeypatch.setattr(module, "load_company_tokens", lambda: ["dead", "alive"])
+
+    async def fake_get_board(client, token):
+        if token == "dead":
+            raise httpx.ReadTimeout("timed out")
+        return [job]
+
+    monkeypatch.setattr(module, "_get_board", fake_get_board)
+
+    postings = await module.fetch("backend developer", "Pune")
+
+    assert len(postings) == 1
+    assert postings[0]["source"] == module.SOURCE_NAME
+
+
+def _stub_sources(
+    monkeypatch,
+    adzuna=None,
+    jsearch_result=None,
+    greenhouse_result=None,
+    lever_result=None,
+    ashby_result=None,
+    adzuna_raises=False,
+    greenhouse_raises=False,
+    lever_raises=False,
+    ashby_raises=False,
+):
     async def fake_adzuna(role, location, limit=None):
         if adzuna_raises:
             raise RuntimeError("adzuna exploded")
@@ -338,9 +729,21 @@ def _stub_sources(monkeypatch, adzuna=None, jsearch_result=None, greenhouse_resu
             raise RuntimeError("greenhouse exploded")
         return greenhouse_result or []
 
+    async def fake_lever(role, location, limit=200):
+        if lever_raises:
+            raise RuntimeError("lever exploded")
+        return lever_result or []
+
+    async def fake_ashby(role, location, limit=200):
+        if ashby_raises:
+            raise RuntimeError("ashby exploded")
+        return ashby_result or []
+
     monkeypatch.setattr(discovery.adzuna_source, "fetch", fake_adzuna)
     monkeypatch.setattr(discovery.jsearch, "fetch", fake_jsearch)
     monkeypatch.setattr(discovery.greenhouse, "fetch", fake_greenhouse)
+    monkeypatch.setattr(discovery.lever, "fetch", fake_lever)
+    monkeypatch.setattr(discovery.ashby, "fetch", fake_ashby)
     # Bypass the on-disk source cache so these exercise the fan-out itself.
     monkeypatch.setattr(discovery, "_cached_source_postings", lambda *a, **k: None)
     monkeypatch.setattr(discovery, "_store_source_postings", lambda *a, **k: None)
@@ -360,20 +763,56 @@ def _src_posting(source, title="Backend Developer", company="Acme", description=
 
 
 @pytest.mark.anyio
-async def test_fan_out_gathers_all_three_sources_and_counts_each(monkeypatch):
+async def test_fan_out_gathers_all_five_sources_and_counts_each(monkeypatch):
     _stub_sources(
         monkeypatch,
         adzuna=[_src_posting("adzuna", company="A1"), _src_posting("adzuna", company="A2")],
         jsearch_result=[_src_posting("jsearch", company="J1")],
         greenhouse_result=[_src_posting("greenhouse", company="G1")],
+        lever_result=[_src_posting("lever", company="L1")],
+        ashby_result=[_src_posting("ashby", company="A1")],
     )
 
     postings, counts = await discovery._gather_sources(
         "backend developer", ["backend developer"], "Bengaluru"
     )
 
-    assert counts == {"adzuna": 2, "jsearch": 1, "greenhouse": 1}
-    assert len(postings) == 4
+    assert counts == {"adzuna": 2, "jsearch": 1, "greenhouse": 1, "lever": 1, "ashby": 1}
+    assert len(postings) == 6
+
+
+@pytest.mark.anyio
+async def test_lever_and_ashby_use_independent_source_cache_entries(monkeypatch):
+    cached_by_source = {
+        "lever": [_src_posting("lever", company="Lever Co")],
+        "ashby": [_src_posting("ashby", company="Ashby Co")],
+    }
+    requested_sources = []
+
+    def fake_cached_source_postings(source, role, location):
+        requested_sources.append(source)
+        return cached_by_source[source]
+
+    async def must_not_fetch():
+        raise AssertionError("a fresh per-source cache hit must not call its provider")
+
+    monkeypatch.setattr(
+        discovery, "_cached_source_postings", fake_cached_source_postings
+    )
+
+    lever_postings = await discovery._cached_fetch(
+        "lever", "backend developer", "India", must_not_fetch
+    )
+    ashby_postings = await discovery._cached_fetch(
+        "ashby", "backend developer", "India", must_not_fetch
+    )
+
+    assert requested_sources == ["lever", "ashby"]
+    assert lever_postings[0]["source"] == "lever"
+    assert ashby_postings[0]["source"] == "ashby"
+    assert discovery._source_cache_key(
+        "lever", "backend developer", "India"
+    ) != discovery._source_cache_key("ashby", "backend developer", "India")
 
 
 @pytest.mark.anyio
@@ -400,12 +839,18 @@ async def test_fan_out_completes_when_one_source_errors(monkeypatch):
 
 @pytest.mark.anyio
 async def test_fan_out_completes_when_every_source_errors(monkeypatch):
-    _stub_sources(monkeypatch, adzuna_raises=True, greenhouse_raises=True)
+    _stub_sources(
+        monkeypatch,
+        adzuna_raises=True,
+        greenhouse_raises=True,
+        lever_raises=True,
+        ashby_raises=True,
+    )
 
     postings, counts = await discovery._gather_sources("role", ["role"], "India")
 
     assert postings == []
-    assert counts == {"adzuna": 0, "jsearch": 0, "greenhouse": 0}
+    assert counts == {"adzuna": 0, "jsearch": 0, "greenhouse": 0, "lever": 0, "ashby": 0}
 
 
 @pytest.mark.anyio
@@ -469,6 +914,21 @@ def test_greenhouse_wins_over_adzuna_but_loses_to_jsearch():
     assert unique[0].source == "jsearch"
 
 
+def test_all_official_ats_sources_outrank_adzuna_in_priority_order():
+    jobs = {
+        source: discovery.normalise_posting(_src_posting(source))
+        for source in ("adzuna", "jsearch", "greenhouse", "lever", "ashby")
+    }
+
+    unique, duplicates = discovery.dedupe(
+        [jobs["adzuna"], jobs["jsearch"], jobs["ashby"], jobs["lever"], jobs["greenhouse"]]
+    )
+
+    assert duplicates == 4
+    assert len(unique) == 1
+    assert unique[0].source == "jsearch"
+
+
 def test_source_priority_beats_description_length():
     """Priority is the primary key: a short JSearch description still wins
     over a long Adzuna one, because the source is the better authority.
@@ -485,7 +945,7 @@ def test_source_priority_beats_description_length():
 
 
 def test_normalise_posting_keeps_the_adapter_source():
-    for source in ("adzuna", "jsearch", "greenhouse"):
+    for source in ("adzuna", "jsearch", "greenhouse", "lever", "ashby"):
         job = discovery.normalise_posting(_src_posting(source))
         assert job.source == source
 
@@ -681,11 +1141,13 @@ def test_every_source_carries_its_own_attribution_label():
                 location="Pune", description="x", url="u", created=None,
             )
         ).source_label
-        for source in ("jsearch", "greenhouse", "adzuna")
+        for source in ("jsearch", "greenhouse", "lever", "ashby", "adzuna")
     }
     assert labels == {
         "jsearch": "via JSearch",
         "greenhouse": "via Greenhouse",
+        "lever": "via Lever",
+        "ashby": "via Ashby",
         "adzuna": "via Adzuna",
     }
 

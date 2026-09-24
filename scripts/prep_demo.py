@@ -145,8 +145,8 @@ async def _run() -> None:
             )
 
     print(
-        "\nCached under ./data/parsed_resumes/, ./data/role_profiles/, "
-        "./data/analyses/ and ./data/discovery_runs/ -- survives a restart."
+        "\nCaches are stored in the configured backend (MongoDB Atlas or the "
+        "JSON fallback) and survive a restart."
     )
     print("Set DEMO_MODE=true and restart the server before the actual demo.")
     print(f"Log in during the demo as: {DEMO_USER_EMAIL} / {DEMO_USER_PASSWORD}")

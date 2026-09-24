@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Test, type-check, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # CI-only values; this workflow does not use GitHub repository secrets.
+      JWT_SECRET: ci-only-test-secret-not-for-production
+      STORAGE_BACKEND: json
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build React application
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Python test suite
+        run: python -m pytest -q
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm exec tsc -- --noEmit
+
+      - name: Smoke-check frontend build
+        working-directory: frontend
+        run: |
+          test -f dist/index.html
+          grep -q 'id="root"' dist/index.html
+          test -n "$(find dist/assets -type f -name '*.js' -print -quit)"

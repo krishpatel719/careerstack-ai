@@ -12,9 +12,10 @@ grid and a genuine two-column layout).
 
 reasonable_length is not applicable for DOCX input, since text_extract.py
 doesn't compute a page count for DOCX -- see _check_reasonable_length.
-When that happens its 8 points are dropped from points_possible rather
-than scored as a failure, so a DOCX resume is scored out of 92, not
-unfairly docked for a property that was never actually measured.
+The table and column checks are likewise unavailable because DOCX layout
+is not inspected. All three checks' 40 points are dropped from
+points_possible rather than scored as passes or failures, so a DOCX resume
+is scored out of 60, not given unearned points for unmeasured properties.
 """
 
 import re
@@ -127,7 +128,7 @@ def _has_core_sections_message(resume_text: str, layout: dict, sections_found: l
     heading_word = "heading" if len(names) == 1 else "headings"
     pronoun = "this" if len(names) == 1 else "these"
     return (
-        f"No {joined} section {heading_word} found — ATS parsers look for "
+        f"No {joined} section {heading_word} found - ATS parsers look for "
         f"{pronoun} {heading_word} by name to structure the resume."
     )
 
@@ -140,18 +141,20 @@ def _has_core_sections_note(resume_text: str, layout: dict, sections_found: list
     if _core_sections_passed_via_projects(sections_found):
         return (
             "No Experience section found, but a Projects section was accepted in its "
-            "place (no employment history) — worth knowing, since not every ATS makes "
+            "place (no employment history) - worth knowing, since not every ATS makes "
             "the same allowance."
         )
     return None
 
 
-def _check_no_tables(resume_text: str, layout: dict, sections_found: list[str]) -> bool:
-    return not layout.get("has_tables", False)
+def _check_no_tables(resume_text: str, layout: dict, sections_found: list[str]) -> bool | None:
+    has_tables = layout.get("has_tables")
+    return None if has_tables is None else not has_tables
 
 
-def _check_single_column(resume_text: str, layout: dict, sections_found: list[str]) -> bool:
-    return not layout.get("is_multicolumn", False)
+def _check_single_column(resume_text: str, layout: dict, sections_found: list[str]) -> bool | None:
+    is_multicolumn = layout.get("is_multicolumn")
+    return None if is_multicolumn is None else not is_multicolumn
 
 
 def _check_reasonable_length(resume_text: str, layout: dict, sections_found: list[str]) -> bool | None:
@@ -181,19 +184,19 @@ CHECKS: list[tuple[str, int, object, str]] = [
         "has_email",
         8,
         _check_has_email,
-        "No email address found — recruiters and ATS software both need a way to contact you.",
+        "No email address found - recruiters and ATS software both need a way to contact you.",
     ),
     (
         "has_phone",
         6,
         _check_has_phone,
-        "No phone number found — add one in a standard format, e.g. +91 98765 43210.",
+        "No phone number found - add one in a standard format, e.g. +91 98765 43210.",
     ),
     (
         "text_extractable",
         15,
         _check_text_extractable,
-        "Very little text could be extracted from this file — it may be a scanned image "
+        "Very little text could be extracted from this file - it may be a scanned image "
         "rather than real text, which most ATS software cannot read at all.",
     ),
     (
@@ -210,34 +213,34 @@ CHECKS: list[tuple[str, int, object, str]] = [
         "no_tables",
         16,
         _check_no_tables,
-        "Tables detected — ATS parsers frequently misread table cells as scrambled or "
+        "Tables detected - ATS parsers frequently misread table cells as scrambled or "
         "out-of-order text, or drop their contents entirely.",
     ),
     (
         "single_column",
         16,
         _check_single_column,
-        "Two-column layout — parsers may interleave the columns, scrambling reading order.",
+        "Two-column layout - parsers may interleave the columns, scrambling reading order.",
     ),
     (
         "reasonable_length",
         8,
         _check_reasonable_length,
-        "Resume is not 1-2 pages — most ATS workflows and recruiters expect a concise "
+        "Resume is not 1-2 pages - most ATS workflows and recruiters expect a concise "
         "resume in that range.",
     ),
     (
         "has_dates",
         8,
         _check_has_dates,
-        "Few or no dates found — ATS software relies on employment dates to compute "
+        "Few or no dates found - ATS software relies on employment dates to compute "
         "years of experience, and missing dates undercount it.",
     ),
     (
         "standard_bullets",
         8,
         _check_standard_bullets,
-        "Non-standard bullet glyphs found — decorative bullet characters can render as "
+        "Non-standard bullet glyphs found - decorative bullet characters can render as "
         "garbled symbols or get stripped out by some parsers.",
     ),
 ]

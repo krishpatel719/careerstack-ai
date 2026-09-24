@@ -15,7 +15,7 @@ import jwt
 
 from app.config import settings
 from app.models.user import UserPublic
-from app.store import list_keys, load_json, save_json
+from app.store import create_json_if_absent, load_by_field, load_json
 
 COLLECTION = "users"
 
@@ -103,9 +103,6 @@ def create_user(email: str, password: str, name: str) -> UserPublic:
     maps that to a 409, not a 500.
     """
     key = _email_key(email)
-    if load_json(COLLECTION, key) is not None:
-        raise ValueError("An account with that email already exists.")
-
     record = {
         "user_id": uuid.uuid4().hex,
         "email": email.strip().lower(),
@@ -113,7 +110,9 @@ def create_user(email: str, password: str, name: str) -> UserPublic:
         "password_hash": hash_password(password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    save_json(COLLECTION, key, record)
+    if not create_json_if_absent(COLLECTION, key, record):
+        raise ValueError("An account with that email already exists.")
+
     return _to_public(record)
 
 
@@ -134,13 +133,6 @@ def authenticate(email: str, password: str) -> UserPublic | None:
 
 
 def get_user_by_id(user_id: str) -> UserPublic | None:
-    """Used by get_current_user to turn a decoded token's user_id back
-    into a UserPublic. Storage is keyed by email hash, not user_id, so
-    this is a linear scan of ./data/users/ -- fine at this project's
-    scale (a handful of demo accounts), not worth indexing pre-emptively.
-    """
-    for key in list_keys(COLLECTION):
-        record = load_json(COLLECTION, key)
-        if record and record.get("user_id") == user_id:
-            return _to_public(record)
-    return None
+    """Resolve a JWT subject through the indexed MongoDB user_id field."""
+    record = load_by_field(COLLECTION, "user_id", user_id)
+    return _to_public(record) if record else None

@@ -7,7 +7,7 @@ how it gets combined with the others.
 """
 
 from app.models.resume import ParsedResume
-from app.services.roleprofile.miner import skill_category
+from app.services.roleprofile.miner import extract_skills_from_text, skill_category
 from app.services.scoring.experience import experience_score
 from app.services.scoring.formatting import CHECKS as FORMAT_CHECKS
 from app.services.scoring.formatting import format_score
@@ -22,7 +22,10 @@ BAND_THRESHOLDS = [(80, "Strong match"), (60, "Competitive"), (40, "Needs work")
 DEFAULT_BAND = "Poor match"
 
 TOP_ACTION_ITEMS = 6
-WEAK_EVIDENCE_FLAT_GAIN = 2.0
+# Evidence recommendations are useful even when we cannot honestly put a
+# point gain on them. Keep a numeric zero for backwards-compatible clients,
+# but mark them unquantified and exclude them from the projected-score sum.
+UNQUANTIFIED_EVIDENCE_GAIN = 0.0
 
 # miner.py's own inclusion floor for skill_frequencies is "mentioned in
 # >=3 postings" -- at a typical 40-posting sample that's 7.5%, low enough
@@ -50,6 +53,48 @@ _CONTACT_CHECKS = ["has_email", "has_phone"]
 
 DIMENSION_STATUS_THRESHOLDS = [(80, "good"), (60, "fair")]
 DEFAULT_DIMENSION_STATUS = "weak"
+
+# Role-fit numbers are estimates from a sampled market, not a promise from
+# a specific employer. Keep the numeric formula stable, but expose enough
+# quality metadata for the UI to avoid presenting a one-posting profile as
+# authoritative.
+ROLE_PROFILE_LOW_SAMPLE = 10
+ROLE_PROFILE_LIMITED_SAMPLE = 20
+ROLE_PROFILE_TARGET_SAMPLE = 40
+
+
+def _role_profile_quality(role_profile: dict) -> dict:
+    """Describe how much confidence the sampled market data supports.
+
+    This deliberately does not alter the ATS arithmetic. It is an honest
+    confidence signal beside the score, so a sparse profile remains
+    backwards-compatible but is not mistaken for a full market sample.
+    """
+    raw_count = role_profile.get("postings_sampled")
+    postings = int(raw_count) if isinstance(raw_count, (int, float)) else 0
+    sparse = bool(role_profile.get("sparse_profile"))
+
+    if postings < ROLE_PROFILE_LOW_SAMPLE or postings <= 0:
+        quality = "low"
+        confidence = 0.25 if postings else 0.0
+        reasons = [f"Only {postings} usable postings were sampled for this role."]
+    elif postings < ROLE_PROFILE_LIMITED_SAMPLE or sparse:
+        quality = "limited"
+        confidence = 0.6 if postings >= ROLE_PROFILE_LIMITED_SAMPLE else 0.45
+        reasons = [f"Role fit uses a limited sample of {postings} postings."]
+    else:
+        quality = "normal"
+        confidence = min(1.0, round(postings / ROLE_PROFILE_TARGET_SAMPLE, 4))
+        reasons = []
+
+    if sparse and quality != "low":
+        reasons.append("The mined skill table was sparse, so some common skills may be missing.")
+
+    return {
+        "sample_quality": quality,
+        "score_confidence": confidence,
+        "confidence_reasons": reasons,
+    }
 
 
 def _band(overall_score: float) -> str:
@@ -101,16 +146,16 @@ def _format_parsing_note(failed: set) -> str:
     if "no_tables" in failed and "single_column" in failed:
         return "Two-column layout with tables; parsers may scramble reading order."
     if "text_extractable" in failed:
-        return "Very little text could be extracted — this may read as blank to a parser."
+        return "Very little text could be extracted - this may read as blank to a parser."
     if "no_tables" in failed:
-        return "Tables detected — cell contents may be scrambled or dropped by a parser."
+        return "Tables detected - cell contents may be scrambled or dropped by a parser."
     if "single_column" in failed:
-        return "Two-column layout — a parser may interleave the columns while reading."
+        return "Two-column layout - a parser may interleave the columns while reading."
     if "reasonable_length" in failed:
         return "Resume length falls outside the typical 1-2 page range."
     if "standard_bullets" in failed:
-        return "Non-standard bullet glyphs found — some may render as garbled symbols."
-    return "Some formatting checks failed — see the format section for details."
+        return "Non-standard bullet glyphs found - some may render as garbled symbols."
+    return "Some formatting checks failed - see the format section for details."
 
 
 def _section_structure_note(failed: set) -> str:
@@ -121,7 +166,7 @@ def _section_structure_note(failed: set) -> str:
     if "has_core_sections" in failed:
         return "Missing a standard experience, education, or skills heading."
     if "has_dates" in failed:
-        return "Few or no employment dates found — experience duration may be undercounted."
+        return "Few or no employment dates found - experience duration may be undercounted."
     return "Some structure checks failed."
 
 
@@ -293,6 +338,7 @@ def compute_ats_score(
             # a broader location; otherwise {"requested_location",
             # "used_location", "requested_postings_sampled"}.
             "location_fallback": role_profile.get("location_fallback"),
+            **_role_profile_quality(role_profile),
         },
     }
 
@@ -343,11 +389,15 @@ def _missing_skill_actions(ats_result: dict) -> list[dict]:
         actions.append(
             {
                 "action": (
-                    f'Add "{item["skill"]}" to your resume -- it appears in '
-                    f'{item["count"]} of the sampled postings for this role.'
+                    f'If you have used {item["skill"]}, surface it in your skills and add an '
+                    f'accurate project or experience bullet; it appears in {item["count"]} of '
+                    "the sampled postings for this role. Do not add it solely to raise the score."
                 ),
                 "type": "missing_skill",
                 "estimated_gain": round(gain, 4),
+                "quantified": True,
+                "requires_verification": True,
+                "action_id": f"skill:{item['skill']}",
                 # Assumes the skill is genuinely there but unlisted, not
                 # something to learn from scratch -- usually true for a
                 # resume-completeness fix, so this defaults to low effort.
@@ -392,15 +442,38 @@ def _format_issue_actions(ats_result: dict) -> list[dict]:
 
 def _weak_evidence_actions(ats_result: dict) -> list[dict]:
     semantic_detail = ats_result["semantic_detail"]
+    missing_skills = {item["skill"] for item in ats_result["keyword_detail"]["missing"]}
     actions = []
     for item in semantic_detail["weakest_requirements"]:
+        requirement = item["requirement"]
+        related_skills = extract_skills_from_text(requirement)
+        # If a missing-skill recommendation already covers this requirement,
+        # do not show a second action that appears to grant the same points.
+        # The skill action now includes the accurate-evidence wording, so the
+        # user gets one coordinated fix instead of double-counted advice.
+        if missing_skills & related_skills:
+            continue
+
         actions.append(
             {
-                "action": f'Add stronger evidence for: "{item["requirement"]}"',
+                "action": (
+                    f'Add stronger, accurate evidence for: "{requirement}" '
+                    "- use a concrete project, result, or responsibility you can defend."
+                ),
                 "type": "weak_evidence",
-                "estimated_gain": WEAK_EVIDENCE_FLAT_GAIN,
+                # Evidence quality is not a deterministic score delta. Keep
+                # the numeric field for older clients, but explicitly mark it
+                # unquantified so it cannot inflate the projected score.
+                "estimated_gain": UNQUANTIFIED_EVIDENCE_GAIN,
+                "quantified": False,
+                "requires_verification": True,
+                "action_id": "evidence:" + str(len(actions)),
                 "effort": "medium",
-                "detail": {"requirement": item["requirement"], "evidence_strength": item["evidence_strength"]},
+                "detail": {
+                    "requirement": requirement,
+                    "evidence_strength": item["evidence_strength"],
+                    "related_skills": sorted(related_skills),
+                },
             }
         )
     return actions
@@ -437,10 +510,12 @@ def build_action_plan(ats_result: dict) -> dict:
     technical-before-professional tiebreak among similarly-valuable
     items).
 
-    projected_score_under_our_model is overall_score plus the sum of the
-    gains actually shown in the plan, capped at 100. The name is
-    deliberate: this is arithmetic on our own weighted formula, not a
-    prediction about how a real ATS would respond to these changes.
+    projected_score_under_our_model is overall_score plus the sum of only
+    the deterministic gains actually shown in the plan, capped at 100.
+    Semantic evidence actions are deliberately excluded from that sum: a
+    stronger bullet has no trustworthy fixed point value until the resume
+    is rescored. The name is deliberate: this is arithmetic on our own
+    weighted formula, not a prediction about how a real ATS would respond.
     """
     candidates = (
         _missing_skill_actions(ats_result)
@@ -452,10 +527,16 @@ def build_action_plan(ats_result: dict) -> dict:
     top_candidates = candidates[:TOP_ACTION_ITEMS]
     items = [{"rank": rank, **item} for rank, item in enumerate(top_candidates, start=1)]
 
-    total_gain = sum(item["estimated_gain"] for item in top_candidates)
-    projected_score = min(100.0, ats_result["overall_score"] + total_gain)
+    quantified_gain = sum(
+        item["estimated_gain"] for item in top_candidates if item.get("quantified", True)
+    )
+    projected_score = min(100.0, ats_result["overall_score"] + quantified_gain)
 
     return {
         "items": items,
+        # Only deterministic keyword/format changes contribute here. Evidence
+        # improvements remain visible in the plan, but are not invented as a
+        # point gain or added to the projection.
+        "quantified_gain_under_our_model": round(quantified_gain, 4),
         "projected_score_under_our_model": round(projected_score, 2),
     }

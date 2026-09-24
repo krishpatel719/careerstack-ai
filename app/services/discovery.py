@@ -14,6 +14,7 @@ and explainable in a viva.
 import asyncio
 import hashlib
 import logging
+import math
 import re
 import uuid
 from datetime import datetime, timezone
@@ -24,15 +25,16 @@ from app.config import settings
 from app.models.job import Job, JobMeta
 from app.models.resume import ParsedResume
 from app.services.extraction.parse_cache import load_cached_parse
-from app.services.jobs import adzuna_source, greenhouse, jsearch
-from app.services.jobs.base import default_source_label, source_rank
+from app.services.jobs import adzuna_source, ashby, greenhouse, jsearch, lever
+from app.services.jobs.base import default_source_label, normalize_external_url, source_rank
 from app.services.roleprofile.miner import (
     SKILL_CATEGORIES,
     extract_skills_from_text,
+    posting_matches_role,
     skill_category,
 )
 from app.services.scoring.keywords import keyword_score, normalize_skill
-from app.store import list_keys, load_json, save_json
+from app.store import list_records, load_json, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +185,11 @@ class ResumeUnavailableError(Exception):
 _ROLE_PARENTS = {
     "backend developer": "software developer",
     "backend engineer": "software engineer",
-    "frontend developer": "software developer",
-    "frontend engineer": "software engineer",
+    # A broad software query reintroduces backend/full-stack postings into a
+    # frontend run. The developer/engineer counterpart is useful phrasing
+    # variety without widening the role itself.
+    "frontend developer": "frontend engineer",
+    "frontend engineer": "frontend developer",
     "full stack developer": "software developer",
     "fullstack developer": "software developer",
     "mern developer": "full stack developer",
@@ -335,24 +340,32 @@ def _is_remote(posting: dict) -> bool:
 
 
 def normalise_posting(posting: dict) -> Job:
-    """One raw Adzuna result -> a Job, before scoring."""
+    """One raw provider posting -> a Job, before scoring."""
     has_salary = posting.get("salary_min") is not None or posting.get("salary_max") is not None
+    # Set by whichever adapter produced this posting (see
+    # services/jobs/base.py). Defaults to adzuna so a dict built by hand --
+    # as the older tests do -- still validates.
+    source = posting.get("source") or "adzuna"
+    description_truncated = posting.get("description_truncated")
+    if description_truncated is None:
+        description_truncated = source == "adzuna"
+    # Source is the authority: even stale/cached metadata must not claim a
+    # full-description source returned a snippet.
+    description_truncated = bool(description_truncated) and source == "adzuna"
+
     return Job(
         fingerprint=fingerprint(
             posting.get("title"), posting.get("company"), posting.get("location")
         ),
-        # Set by whichever adapter produced this posting (see
-        # services/jobs/base.py). Defaults to adzuna so a dict built by
-        # hand -- as the older tests do -- still validates.
-        source=posting.get("source") or "adzuna",
-        source_label=posting.get("source_label") or default_source_label(posting.get("source")),
+        source=source,
+        source_label=posting.get("source_label") or default_source_label(source),
         employment_type=posting.get("employment_type"),
         title=posting.get("title"),
         company=posting.get("company"),
         location=posting.get("location"),
         is_remote=_is_remote(posting),
         description=posting.get("description") or "",
-        url=posting.get("url"),
+        url=normalize_external_url(posting.get("url")),
         salary_min=posting.get("salary_min"),
         salary_max=posting.get("salary_max"),
         # Each adapter supplies its own currency where the provider gives
@@ -360,7 +373,55 @@ def normalise_posting(posting: dict) -> Job:
         # India endpoint and that API returns no currency field at all.
         salary_currency=posting.get("salary_currency") or ("INR" if has_salary else None),
         posted_at=posting.get("created"),
+        meta=JobMeta(description_truncated=description_truncated),
     )
+
+
+def normalise_stored_job(data: dict) -> Job:
+    """Validate a persisted Job after re-applying external-input guards.
+
+    Cached runs may predate source-aware truncation or URL normalisation, so
+    validation alone is not enough: repair both fields before any stored
+    posting is rescored or returned.
+    """
+    job_data = dict(data)
+    source = job_data.get("source") or "adzuna"
+    job_data["source"] = source
+    job_data["url"] = normalize_external_url(job_data.get("url"))
+
+    meta_data = dict(job_data.get("meta") or {})
+    meta_data["description_truncated"] = source == "adzuna"
+    job_data["meta"] = meta_data
+    return Job.model_validate(job_data)
+
+
+def public_jobs(run: dict) -> list[dict]:
+    """Return validated, client-safe jobs from any persisted run.
+
+    Runs created before URL and source-metadata hardening may contain unsafe
+    links or stale provider flags. Never return those raw records at the API
+    boundary. A single malformed legacy job is skipped rather than breaking
+    the entire otherwise-valid run.
+    """
+    jobs: list[dict] = []
+    if not isinstance(run, dict):
+        return jobs
+    stored_jobs = run.get("jobs", [])
+    if not isinstance(stored_jobs, list):
+        return jobs
+    for stored in stored_jobs:
+        try:
+            if not isinstance(stored, dict):
+                raise TypeError("stored job is not an object")
+            jobs.append(normalise_stored_job(stored).model_dump())
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Skipping malformed job %r in discovery run %r: %s",
+                stored.get("fingerprint") if isinstance(stored, dict) else None,
+                run.get("run_id"),
+                exc,
+            )
+    return jobs
 
 
 # --------------------------------------------------------------------------
@@ -601,11 +662,10 @@ def score_job(
         "weights": dict(RANK_WEIGHTS),
     }
     job.meta = JobMeta(
-        # Adzuna's free tier always truncates the description, so this is
-        # flagged per job rather than inferred from length -- the UI says
-        # the score is preliminary instead of quietly implying we read the
-        # whole posting.
-        description_truncated=True,
+        # Truncation is a provider contract, not a length guess. Preserve it
+        # through rescoring so JSearch/Greenhouse never inherit the Adzuna
+        # caveat merely by being reopened in the detail view.
+        description_truncated=job.source == "adzuna",
         description_chars=len(description),
         skills_detected_in_posting=len(frequencies),
         # Only postings that named *something* are "low confidence"; one
@@ -662,12 +722,12 @@ def _cached_source_postings(source: str, role: str, location: str) -> list[dict]
     next to it -- each source's freshness stands on its own.
     """
     entry = load_json(SOURCE_CACHE_COLLECTION, _source_cache_key(source, role, location))
-    if not entry:
+    if not isinstance(entry, dict) or not entry:
         return None
 
     try:
         cached_at = datetime.fromisoformat(entry["cached_at"])
-    except (KeyError, ValueError):
+    except (KeyError, TypeError, ValueError):
         return None
     if cached_at.tzinfo is None:
         cached_at = cached_at.replace(tzinfo=timezone.utc)
@@ -692,6 +752,50 @@ def _store_source_postings(source: str, role: str, location: str, postings: list
     )
 
 
+def _is_cacheable_posting(posting: object) -> bool:
+    """Whether a raw cached/provider posting has the common scalar shape.
+
+    Cached records are external input too.  A dict-shaped record can still
+    carry a list in a field that the model promises is text, so checking
+    only ``isinstance(posting, dict)`` is not enough.
+    """
+    if not isinstance(posting, dict):
+        return False
+    text_fields = (
+        "source",
+        "source_label",
+        "title",
+        "company",
+        "location",
+        "description",
+        "category",
+        "employment_type",
+        "url",
+        "created",
+        "salary_currency",
+    )
+    if any(
+        field in posting
+        and posting[field] is not None
+        and not isinstance(posting[field], str)
+        for field in text_fields
+    ):
+        return False
+    if "is_remote" in posting and posting["is_remote"] is not None and not isinstance(
+        posting["is_remote"], bool
+    ):
+        return False
+    for field in ("salary_min", "salary_max"):
+        value = posting.get(field)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            return False
+    return True
+
+
 async def _cached_fetch(source: str, role: str, location: str, fetcher) -> list[dict]:
     """Serve one source from cache when fresh, otherwise fetch and store.
 
@@ -703,9 +807,32 @@ async def _cached_fetch(source: str, role: str, location: str, fetcher) -> list[
     cached = _cached_source_postings(source, role, location)
     if cached is not None:
         logger.info("Serving %s from cache for role=%r location=%r", source, role, location)
-        return cached
+        # Filter on every cache read as well as every fresh fetch. This also
+        # repairs any source cache written before role-title filtering existed.
+        if not isinstance(cached, list):
+            return []
+        return [
+            posting
+            for posting in cached
+            if _is_cacheable_posting(posting) and posting_matches_role(posting, role)
+        ]
 
-    postings = await fetcher()
+    raw_postings = await fetcher()
+    if not isinstance(raw_postings, list):
+        logger.warning("Source %s returned a malformed posting collection", source)
+        raw_postings = []
+    postings = [
+        posting
+        for posting in raw_postings
+        if _is_cacheable_posting(posting) and posting_matches_role(posting, role)
+    ]
+    if raw_postings and not postings:
+        logger.info(
+            "Source %s returned %d posting(s) for role=%r, but none had a matching title",
+            source,
+            len(raw_postings),
+            role,
+        )
     if postings:
         _store_source_postings(source, role, location, postings)
     return postings
@@ -736,11 +863,11 @@ async def _fetch_jsearch(role: str, location: str) -> list[dict]:
 
 
 async def _gather_sources(role: str, queries: list[str], location: str) -> tuple[list[dict], dict]:
-    """Fan out across all three sources concurrently.
+    """Fan out across all configured job sources concurrently.
 
     Returns (raw postings, per-source counts). Every source is wrapped in
     return_exceptions=True on top of each adapter's own never-raise
-    contract: a source that fails contributes nothing and the other two
+    contract: a source that fails contributes nothing and the other sources
     still produce a run.
     """
     tasks = {
@@ -753,6 +880,12 @@ async def _gather_sources(role: str, queries: list[str], location: str) -> tuple
         "greenhouse": _cached_fetch(
             "greenhouse", role, location, lambda: greenhouse.fetch(role, location)
         ),
+        "lever": _cached_fetch(
+            "lever", role, location, lambda: lever.fetch(role, location)
+        ),
+        "ashby": _cached_fetch(
+            "ashby", role, location, lambda: ashby.fetch(role, location)
+        ),
     }
 
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -764,8 +897,13 @@ async def _gather_sources(role: str, queries: list[str], location: str) -> tuple
             logger.warning("Job source %r failed: %s", source_name, result)
             counts[source_name] = 0
             continue
-        counts[source_name] = len(result)
-        postings.extend(result)
+        if not isinstance(result, list):
+            logger.warning("Job source %r returned a malformed posting collection", source_name)
+            counts[source_name] = 0
+            continue
+        valid = [posting for posting in result if isinstance(posting, dict)]
+        counts[source_name] = len(valid)
+        postings.extend(valid)
 
     return postings, counts
 
@@ -781,7 +919,14 @@ async def _fetch_queries(
     """
     role = role or (queries[0] if queries else "")
     postings, counts = await _gather_sources(role, queries, location)
-    jobs = [normalise_posting(posting) for posting in postings]
+    jobs: list[Job] = []
+    for posting in postings:
+        if not isinstance(posting, dict):
+            continue
+        try:
+            jobs.append(normalise_posting(posting))
+        except (TypeError, ValueError, AttributeError) as exc:
+            logger.warning("Skipping malformed posting while normalising discovery: %s", exc)
     return jobs, counts, len(postings)
 
 
@@ -932,10 +1077,29 @@ async def execute_run(run_id: str) -> dict:
                     f"scripts/prep_demo.py (DEMO_MODE off) before relying on it "
                     f"in demo mode."
                 )
+            # A warmed run may come from another user. Reuse its public
+            # posting data and source/location metadata, but never trust its
+            # resume-dependent ranking fields. Validate each posting back to
+            # Job, then score and sort every one against this run's resume
+            # before copying it into the caller's run.
+            cached_jobs: list[Job] = []
+            cached_postings = cached.get("jobs", [])
+            if isinstance(cached_postings, list):
+                for job in cached_postings:
+                    if not isinstance(job, dict) or not posting_matches_role(job, role):
+                        continue
+                    try:
+                        cached_jobs.append(normalise_stored_job(job))
+                    except (TypeError, ValueError, AttributeError):
+                        logger.warning("Skipping malformed cached posting in demo run")
+            else:
+                logger.warning("Cached discovery run has a malformed jobs collection")
+            search_location = (cached.get("widened") or {}).get("to") or location
+            ranked = rank_jobs(cached_jobs, resume_text, resume_skills, search_location)
             run["stats"] = cached["stats"]
-            run["queries"] = cached.get("queries", [])
+            run["queries"] = generate_queries(role, resume)
             run["widened"] = cached.get("widened")
-            run["jobs"] = cached.get("jobs", [])
+            run["jobs"] = [job.model_dump() for job in ranked]
             run["status"] = "complete"
             run["completed_at"] = datetime.now(timezone.utc).isoformat()
             run["served_from_cache"] = True
@@ -983,15 +1147,31 @@ async def execute_run(run_id: str) -> dict:
         logger.exception("Discovery run %s failed", run_id)
         run["status"] = "failed"
         run["completed_at"] = datetime.now(timezone.utc).isoformat()
-        run["error"] = str(exc) or "Something went wrong while finding matching jobs."
+        if isinstance(exc, DiscoveryUnavailableError):
+            # This is an application-authored, already-curated remediation
+            # message (for example, the exact demo-cache miss), not provider
+            # or filesystem detail.
+            run["error"] = str(exc)
+        else:
+            # Unexpected provider payloads, paths, and request details stay
+            # in the server log rather than becoming user-facing API data.
+            run["error"] = (
+                "We couldn't complete the job search because one or more data "
+                "sources failed. Please try again in a moment."
+            )
 
     _save(run)
     return run
 
 
 def get_job(run: dict, job_fingerprint: str) -> dict | None:
-    for job in run.get("jobs", []):
-        if job.get("fingerprint") == job_fingerprint:
+    if not isinstance(run, dict):
+        return None
+    jobs = run.get("jobs", [])
+    if not isinstance(jobs, list):
+        return None
+    for job in jobs:
+        if isinstance(job, dict) and job.get("fingerprint") == job_fingerprint:
             return job
     return None
 
@@ -1010,10 +1190,13 @@ def rescore_job_against_posting(run: dict, job_fingerprint: str) -> dict | None:
 
     analysis = load_json(ANALYSES_COLLECTION, run["analysis_id"])
     if analysis is None:
-        return stored
+        # The stored score cannot be refreshed without the parsed resume, but
+        # the public response still must not expose a legacy provider URL or
+        # stale source metadata verbatim.
+        return normalise_stored_job(stored).model_dump()
 
     resume = _resume_for_analysis(analysis)
-    job = Job.model_validate(stored)
+    job = normalise_stored_job(stored)
     target_location = (run.get("widened") or {}).get("to") or run["target"]["location"] or ""
 
     scored = score_job(
@@ -1047,16 +1230,21 @@ def find_cached_run(
     role/location themselves sees their own results.
     """
     candidates = []
-    for key in list_keys(COLLECTION):
-        if key == exclude_run_id:
-            continue
-        run = load_json(COLLECTION, key)
+    for run in list_records(COLLECTION):
         if not run or run.get("status") != "complete":
             continue
-        target = run.get("target") or {}
-        if (target.get("role") or "").lower() != role.lower():
+        if run.get("run_id") == exclude_run_id:
             continue
-        if (target.get("location") or "").lower() != location.lower():
+        target = run.get("target")
+        if not isinstance(target, dict):
+            continue
+        target_role = target.get("role")
+        target_location = target.get("location")
+        if not isinstance(target_role, str) or not isinstance(target_location, str):
+            continue
+        if target_role.lower() != role.lower():
+            continue
+        if target_location.lower() != location.lower():
             continue
         candidates.append(run)
 
@@ -1065,5 +1253,9 @@ def find_cached_run(
     # The caller's own run wins over anyone else's, then most recent.
     return max(
         candidates,
-        key=lambda run: (run.get("user_id") == user_id, run.get("completed_at") or ""),
+        key=lambda run: (
+            run.get("user_id") == user_id,
+            bool(run.get("jobs")),
+            run.get("completed_at") or "",
+        ),
     )

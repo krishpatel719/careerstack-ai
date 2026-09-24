@@ -17,7 +17,7 @@ class JobMeta(BaseModel):
     not "of what this job needs, you cover X".
     """
 
-    description_truncated: bool = True
+    description_truncated: bool = False
     description_chars: int = 0
     skills_detected_in_posting: int = 0
     # True when the posting named too few skills for its coverage figure

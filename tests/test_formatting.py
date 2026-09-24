@@ -7,8 +7,11 @@ where a test specifically wants real extracted layout signals.
 
 from pathlib import Path
 
-from app.services.extraction.layout import layout_signals
-from app.services.extraction.text_extract import extract_text
+import pytest
+
+import app.services.extraction.text_extract as text_extract
+from app.services.extraction.layout import get_layout_signals, layout_signals
+from app.services.extraction.text_extract import ExtractionError, extract_text
 from app.services.scoring.formatting import format_score
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -104,24 +107,47 @@ def test_empty_text_fails_text_extractable():
     assert result["score"] < 1.0
 
 
-def test_docx_input_skips_reasonable_length_instead_of_failing_it():
-    """page_count is None for DOCX (text_extract.py never computes one for
-    DOCX), which reasonable_length has no way to check. It must be
-    excluded from scoring rather than penalised -- dropped from
-    points_possible and reported as skipped, not as a failed issue.
+def test_docx_layout_marks_uninspected_signals_as_none():
+    layout = get_layout_signals(b"not parsed here", "resume.docx")
+
+    assert layout == {
+        "has_images": None,
+        "has_tables": None,
+        "is_multicolumn": None,
+        "page_count": None,
+        "font_families": None,
+        "text_in_header_footer": None,
+    }
+
+
+def test_docx_input_skips_unmeasured_layout_checks():
+    """DOCX table, column, and page-count properties are not inspected, so
+    their 40 points must be excluded from scoring rather than treated as
+    passes or failures.
     """
-    docx_layout = {**CLEAN_RESUME_LAYOUT, "page_count": None}
+    docx_layout = get_layout_signals(b"not parsed here", "resume.docx")
 
     result = format_score(CLEAN_RESUME_TEXT, docx_layout, CLEAN_RESUME_SECTIONS)
 
-    assert result["points_possible"] == 92
-    assert result["points_earned"] == 92
+    assert result["points_possible"] == 60
+    assert result["points_earned"] == 60
     assert result["score"] == 1.0
+    assert result["issues"] == []
+    assert result["skipped"] == [
+        {"check": "no_tables", "status": "not_applicable"},
+        {"check": "single_column", "status": "not_applicable"},
+        {"check": "reasonable_length", "status": "not_applicable"},
+    ]
 
-    failed_checks = {issue["check"] for issue in result["issues"]}
-    assert "reasonable_length" not in failed_checks
 
-    assert result["skipped"] == [{"check": "reasonable_length", "status": "not_applicable"}]
+def test_legacy_doc_is_rejected_without_routing_to_docx2txt(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("legacy .doc must not be sent to docx2txt")
+
+    monkeypatch.setattr(text_extract.docx2txt, "process", fail_if_called)
+
+    with pytest.raises(ExtractionError, match=r"Legacy \.doc.*\.docx"):
+        extract_text(b"legacy binary document", "resume.doc")
 
 
 def test_projects_section_is_accepted_in_place_of_experience():
@@ -180,6 +206,6 @@ def test_missing_only_experience_names_a_single_section_singular():
 
     issue = next(issue for issue in result["issues"] if issue["check"] == "has_core_sections")
     assert issue["message"] == (
-        "No Experience section heading found — ATS parsers look for "
+        "No Experience section heading found - ATS parsers look for "
         "this heading by name to structure the resume."
     )

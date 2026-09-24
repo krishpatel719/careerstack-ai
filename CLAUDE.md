@@ -1,4 +1,4 @@
-# CareerStack AI — Resume Analysis Module
+# CareerStack AI - Resume Analysis Module
 
 ## What this is
 
@@ -7,7 +7,7 @@ target job role. The system scores the resume against what that role actually
 demands in the live job market, and returns a prioritised list of fixes.
 
 Academic project (Software Group Project, 7th sem CSE). Demo deadline: 22 Aug.
-Scope is deliberately narrow — see "Out of scope" below and do not exceed it.
+Scope is deliberately narrow - see "Out of scope" below and do not exceed it.
 
 ## The one rule that matters
 
@@ -49,7 +49,7 @@ text, then rapidfuzz ratio >= 90.
 ### semantic_fit
 Per-requirement, NOT whole-document. For each requirement sentence in the role
 profile, find the best-matching line anywhere in the resume, then average those
-maxima. Whole-document cosine similarity destroys the signal — do not do it.
+maxima. Whole-document cosine similarity destroys the signal - do not do it.
 
 Calibrate raw MiniLM cosine from the 0.30-0.85 band onto 0-1.
 
@@ -62,28 +62,44 @@ N points".
 
 ### experience_alignment
 0.7 * years_component + 0.3 * education_component. Years come from merged,
-non-overlapping employment intervals computed in Python — never ask the LLM to
+non-overlapping employment intervals computed in Python - never ask the LLM to
 do date arithmetic.
 
 ## Tech stack
 
 - Python 3.12, FastAPI, uvicorn
+- Optional MongoDB Atlas through one long-lived PyMongo client; JSON is the
+  zero-config local/demo/test store
 - PyMuPDF (text + layout), pdfplumber (table detection), docx2txt
 - sentence-transformers all-MiniLM-L6-v2, CPU only, local
 - groq SDK (openai/gpt-oss-120b), temperature=0
 - rapidfuzz, httpx, tenacity, pydantic v2
 - Adzuna API for mining role profiles (country code "in" for India)
+- React 19 + TypeScript + Vite, Tailwind CSS v4, shadcn/ui source components
+- Framer Motion for restrained Aceternity-style product moments
+- react-pdf/pdf.js for browser-side PDF resume previews
 
-Deliberately NOT used: LangChain, LangGraph, MongoDB, Docker, React, Firebase.
-Do not introduce them.
+The frontend is a Vite app under `frontend/`. The backend serves its
+production build from `frontend/dist`; build it before starting the product
+server.
 
 ## Storage
 
-JSON files under ./data/. No database. Cache role profiles keyed on
-sha1(role + location) with a 7-day TTL. Cache every Adzuna response to disk —
-the free tier is ~1000 calls/month and blowing it kills the demo.
+JSON files under ./data/ are the zero-config local/demo store. Production
+deployments may explicitly select MongoDB Atlas through configuration. One
+process-wide PyMongo client is created lazily and closed by FastAPI lifespan;
+startup pings Atlas and creates query/TTL indexes. `app/store.py` is the
+compatibility repository: its keyed record API works against either backend.
+Legacy JSON can be imported with `scripts/migrate_json_to_mongodb.py`; the
+importer is idempotent and never deletes source files.
 
-Add a DEMO_MODE env flag that reads only from cache and never hits the network.
+Cache role profiles keyed on sha1(role + location) for 7 days and cache every
+Adzuna/job-source response for 6 hours. Mongo TTL indexes enforce those windows
+alongside the existing application checks. The free Adzuna tier is ~1000 calls per
+month, so never remove caching.
+
+`DEMO_MODE` blocks external model/provider calls. Atlas may still be used as the
+persistence service; use `STORAGE_BACKEND=json` only when fully offline.
 
 ## Layout
 
@@ -91,6 +107,8 @@ Add a DEMO_MODE env flag that reads only from cache and never hits the network.
 app/
   main.py                       FastAPI app, routes only, zero logic
   config.py                     pydantic-settings from .env
+  database.py                   MongoDB client lifecycle and indexes
+  store.py                      MongoDB/JSON repository facade
   models/                       Pydantic schemas
   services/
     extraction/                 text_extract.py, layout.py, llm_parse.py
@@ -100,27 +118,37 @@ app/
   data/skill_aliases.json
 tests/
   fixtures/                     sample resumes (real PDFs)
-static/index.html               single-page UI, plain fetch(), no build step
-data/                           runtime cache, gitignored
+frontend/                       React + TypeScript + Vite product frontend
+frontend/dist/                  local production build served by FastAPI (ignored)
+data/                           JSON fallback/migration source, gitignored
 ```
 
 Routers validate input, call a service, return a response. Every algorithm
-lives in services/. This is non-negotiable — it is what makes the code testable.
+lives in services/. This is non-negotiable - it is what makes the code testable.
 
 ## Conventions
 
 - Type hints on every function signature
 - Pure functions in services/ wherever possible; pass data in, return data out
-- No global mutable state except the lru_cached embedding model
+- No global mutable state except the lru_cached embedding model and the
+  process-wide MongoDB client owned by app/database.py
 - Every external call wrapped in tenacity retry, and every job-source failure
-  returns [] rather than raising — one dead source must not kill a run
+  returns [] rather than raising - one dead source must not kill a run. Retry
+  only transient HTTP failures (timeouts, 408/425/429, 5xx); never retry
+  permanent 400/401/403/404 responses.
+- Job discovery uses provider APIs or documented public JSON endpoints only.
+  Do not add an HTML scraper that bypasses access controls, rate limits,
+  CAPTCHAs, or provider terms. Preserve provider attribution and the original
+  posting URL, and cache aggressively.
 - Round every number that reaches the user
 - Errors surface as plain-language messages, never raw exceptions
 
 ## Commands
 
 ```
-uvicorn app.main:app --reload      run dev server on :8000
+uvicorn app.main:app --reload      run API server on :8000
+npm --prefix frontend run dev      run Vite frontend on :5173
+npm --prefix frontend run build    build the React production shell
 pytest -q                          run tests
 pytest tests/test_scoring.py -v    scoring tests only
 ```
@@ -130,17 +158,17 @@ pytest tests/test_scoring.py -v    scoring tests only
 Do these strictly in sequence. Do not start a step before the previous one runs
 correctly on real input.
 
-1. text_extract.py — prove it on 5 real resume PDFs, print to terminal
-2. llm_parse.py — structured extraction, validated against ParsedResume
-3. adzuna.py + miner.py — mine a role profile, print the frequency table
-4. formatting.py — pure Python, no network, cannot fail in a demo. Build first
+1. text_extract.py - prove it on 5 real resume PDFs, print to terminal
+2. llm_parse.py - structured extraction, validated against ParsedResume
+3. adzuna.py + miner.py - mine a role profile, print the frequency table
+4. formatting.py - pure Python, no network, cannot fail in a demo. Build first
    among the scoring components.
-5. keywords.py — frequency-weighted coverage
-6. semantic.py — per-requirement embeddings
+5. keywords.py - frequency-weighted coverage
+6. semantic.py - per-requirement embeddings
 7. experience.py
-8. ats.py — combine
+8. ats.py - combine
 9. FastAPI routes
-10. static/index.html
+10. React product frontend under frontend/
 
 ## Testing
 
@@ -148,21 +176,23 @@ Write tests for scoring components as they are built, not afterwards. Scoring
 functions are pure, so they are cheap to test and the tests catch silent
 regressions in the numbers.
 
-## Out of scope — do not build
+## Out of scope - do not build
 
 Bullet rewriting, application tracker, OCR, LangGraph orchestration,
-MongoDB, React frontend, Docker.
+Docker.
 
 If a change would require any of these, say so and stop rather than adding it.
 
 ### Deliberately added after the original scope
 
-Two items were moved out of "do not build" by explicit decision, after
+Three items were moved out of "do not build" by explicit decision, after
 the original demo date. They are in scope now:
 
-- **Authentication** — JWT (pyjwt + bcrypt directly, not passlib).
+- **Authentication** - JWT (pyjwt + bcrypt directly, not passlib).
   See app/services/auth.py, app/routers/auth.py, app/dependencies.py.
-- **Job discovery** — see app/services/discovery.py and the section below.
+- **Job discovery** - see app/services/discovery.py and the section below.
+- **MongoDB persistence** - Atlas is the production store; see app/database.py,
+  app/store.py, and scripts/migrate_json_to_mongodb.py.
 
 Nothing else on the list above has moved. Ask before adding to it.
 
@@ -173,22 +203,23 @@ Adzuna client, the skill vocabulary and extractor, and keywords.py.
 
 ### Job sources
 
-Three adapters behind one interface (app/services/jobs/base.py). Each
+Five adapters behind one interface (app/services/jobs/base.py). Each
 never raises -- a dead source returns [] and the run continues on the
 others. They fan out concurrently and are cached per source with a 6-hour
-TTL, so one source being rate-limited doesn't invalidate the others.
+TTL, so one source being rate-limited doesn't invalidate the others. Lever
+and Ashby are opt-in public ATS adapters with curated board-token files.
 
 Dedupe priority when the same posting arrives from several sources:
 
 ```
-jsearch > greenhouse > adzuna
+jsearch > greenhouse > lever > ashby > adzuna
 ```
 
 JSearch wins because it returns full descriptions rather than Adzuna's
 ~500-character snippet, and the per-posting keyword score is computed over
-that text. Greenhouse is the companies' own ATS, so it's authoritative for
-its boards but covers only those companies. Within a source, the fullest
-description wins.
+that text. Greenhouse, Lever, and Ashby are first-party company ATS sources
+for their configured boards, so their links and descriptions are authoritative
+for those employers. Within a source, the fullest description wins.
 
 **Greenhouse tokens must be verified, not assumed.** The list originally
 specified (razorpay, phonepe, zerodha, cred, meesho, postman, freshworks,
@@ -203,7 +234,7 @@ renamed board 404s silently and just costs coverage.
 use and returns [] forever, making no HTTP call; Adzuna and Greenhouse
 still run.
 
-**A RapidAPI key is not enough on its own — you must also subscribe to
+**A RapidAPI key is not enough on its own - you must also subscribe to
 JSearch.** A key that isn't subscribed returns exactly the same 403 and
 message ("You are not subscribed to this API") as a completely invalid
 key, so the failure is easy to misread as a bad key. Verified by sending a
@@ -211,7 +242,7 @@ deliberately invalid key and getting a byte-identical response. Subscribe
 at rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch ("Subscribe to Test",
 free Basic plan, 200 req/month); the same key then works. As of the last
 check this repo's key is present but **not subscribed**, so JSearch
-contributes nothing and discovery runs on the other two sources.
+contributes nothing and discovery runs on the other configured sources.
 
 **Quota is tracked locally** (app/services/jobs/quota.py), because the
 free plan exposes no usable remaining-quota header. Every call is counted
@@ -241,7 +272,7 @@ spec, and it exists because of a measured problem, not a hunch. Adzuna's
 free tier truncates each description to ~500 characters. On a live
 65-posting run, 65% of postings yielded at most one detectable skill, and
 every posting that scored 100% keyword coverage did so off a single
-detected skill — a Shopify job outranked a genuinely relevant AI role
+detected skill - a Shopify job outranked a genuinely relevant AI role
 because its snippet happened to name one skill the resume had.
 
 So coverage is damped linearly below MIN_SKILLS_FOR_FULL_CONFIDENCE (3
@@ -249,12 +280,14 @@ skills). The weights above are unchanged; what changed is how much of the
 keyword term a thin posting may claim. Two flags surface this in the UI
 rather than hiding it:
 
-- `meta.low_confidence` — named some skills, too few to be sure.
-- `meta.skills_unscored` — named none we recognise, so the skills term
+- `meta.low_confidence` - named some skills, too few to be sure.
+- `meta.skills_unscored` - named none we recognise, so the skills term
   could not be computed at all. Ranked on recency and location alone.
 
-A per-posting score is always preliminary. It reports what the snippet
-named, not what the job needs.
+For Adzuna postings, the per-posting score is preliminary because it reports
+what the provider's shortened snippet named, not what the full job needs.
+JSearch and Greenhouse supply fuller descriptions and are not labelled as
+truncated.
 
 **Why the keyword term is half ratio and half absolute count.** Coverage
 alone is a ratio, and a ratio rewards postings that name few requirements.
@@ -282,14 +315,14 @@ demo so nothing depends on a live network call.
 
 **Use location "India" for the scoring demo.** Those target numbers only
 hold against the India profile (measured: 45.4 -> 71.6, a +26.2 gap).
-Ahmedabad is a genuinely sparser market — 32 postings, sparse_profile=True —
+Ahmedabad is a genuinely sparser market - 32 postings, sparse_profile=True -
 and the same two resumes score 37.9 -> 54.9 there, a +17 gap. Both are
 correct; India is the one the numbers in this file describe, and it's what
 prep_demo.py mines.
 
 Job discovery demos fine from any of the three warmed cities. Rajkot is the
 one that shows the location-widening banner (0 postings there, widens to
-India). Ahmedabad does NOT widen — it returns 65 unique postings, well above
+India). Ahmedabad does NOT widen - it returns 65 unique postings, well above
 the threshold.
 
 ### Never run the test suite against demo data without tests/conftest.py
@@ -303,5 +336,5 @@ nothing failed to flag it.
 
 tests/conftest.py now points store.DATA_DIR at a temp directory for the whole
 session. If that fixture is ever removed or bypassed, re-check ./data/
-role_profiles for entries with no sparse_profile key — that's the fingerprint
+role_profiles for entries with no sparse_profile key - that's the fingerprint
 of a test-authored profile.

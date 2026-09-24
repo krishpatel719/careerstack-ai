@@ -53,6 +53,16 @@ def test_register_login_and_access_protected_route():
     assert me_response.json()["email"] == email
 
 
+def test_register_rejects_password_longer_than_72_utf8_bytes():
+    """bcrypt limits encoded bytes, not Unicode character count."""
+    response = client.post(
+        "/api/auth/register",
+        json={"name": "Test User", "email": _unique_email(), "password": "é" * 37},
+    )
+
+    assert response.status_code == 422
+
+
 def test_duplicate_email_returns_409():
     email = _unique_email()
     _register(email)

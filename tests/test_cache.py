@@ -16,6 +16,7 @@ import pytest
 import app.services.roleprofile.cache as cache_module
 from app.config import settings
 from app.services.roleprofile.cache import _cache_key, get_or_mine
+from app.services.roleprofile.miner import RoleProfileDataUnavailableError
 from app.store import save_json
 
 TEST_COLLECTION = "role_profiles"
@@ -27,7 +28,12 @@ def _seed_profile(role: str, location: str, postings_sampled: int) -> None:
         "location": location,
         "postings_sampled": postings_sampled,
         "sampled_at": datetime.now(timezone.utc).isoformat(),
-        "skill_frequencies": {},
+        "skill_frequencies": {
+            "python": {
+                "frequency": 1 / postings_sampled,
+                "count": 1,
+            }
+        },
         "requirement_sentences": [],
         "median_experience_years": 0.0,
         "source_ids": [],
@@ -136,3 +142,75 @@ def test_demo_mode_never_calls_mine_role_profile_and_raises_on_a_cache_miss(monk
 
     with pytest.raises(RuntimeError, match="DEMO_MODE is on"):
         asyncio.run(get_or_mine("test role g", "Nowhereville"))
+
+
+def test_unusable_mining_result_is_not_cached(monkeypatch):
+    """An all-failed/zero-result response cannot become a fresh cache entry."""
+    async def _unusable_result(*args, **kwargs):
+        return {
+            "role": "test unusable result",
+            "location": "Nowhereville",
+            "postings_sampled": 0,
+            "sampled_at": datetime.now(timezone.utc).isoformat(),
+            "skill_frequencies": {},
+        }
+
+    monkeypatch.setattr(cache_module, "mine_role_profile", _unusable_result)
+    save_calls = []
+    monkeypatch.setattr(cache_module, "save_json", lambda *args: save_calls.append(args))
+
+    with pytest.raises(RoleProfileDataUnavailableError, match="no postings"):
+        asyncio.run(get_or_mine("test unusable result", "Nowhereville"))
+
+    assert save_calls == []
+
+
+def test_zero_results_fall_back_to_usable_same_role_india(monkeypatch):
+    _seed_profile("test zero city", "India", 40)
+
+    async def _no_results_for_city(role, location):
+        return {
+            "role": role,
+            "location": location,
+            "postings_sampled": 0,
+            "sampled_at": datetime.now(timezone.utc).isoformat(),
+            "skill_frequencies": {},
+        }
+
+    monkeypatch.setattr(cache_module, "mine_role_profile", _no_results_for_city)
+    result = asyncio.run(get_or_mine("test zero city", "Nowhereville"))
+
+    assert result["location_fallback"] == {
+        "requested_location": "Nowhereville",
+        "used_location": "India",
+        "requested_postings_sampled": 0,
+    }
+    assert result["postings_sampled"] == 40
+
+
+def test_unusable_cached_profile_is_ignored(monkeypatch):
+    key = _cache_key("test unusable cache", "India")
+    save_json(
+        TEST_COLLECTION,
+        key,
+        {
+            "role": "test unusable cache",
+            "location": "India",
+            "postings_sampled": 40,
+            "sampled_at": datetime.now(timezone.utc).isoformat(),
+            "skill_frequencies": {},
+        },
+    )
+
+    async def _mine_again(*args, **kwargs):
+        return {
+            "role": "test unusable cache",
+            "location": "India",
+            "postings_sampled": 2,
+            "sampled_at": datetime.now(timezone.utc).isoformat(),
+            "skill_frequencies": {"python": {"frequency": 0.5, "count": 1}},
+        }
+
+    monkeypatch.setattr(cache_module, "mine_role_profile", _mine_again)
+    result = asyncio.run(get_or_mine("test unusable cache", "India"))
+    assert result["postings_sampled"] == 2
