@@ -1,12 +1,9 @@
-import type { ReactNode } from "react";
 import {
   ArrowRight,
   Check,
-  FileSearch,
-  LockKeyhole,
-  ScanLine,
-  Target,
-  Upload,
+  ChevronRight,
+  ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Brand, SiteHeader } from "@/components/SiteChrome";
@@ -22,373 +19,159 @@ export function LandingPage({
 }) {
   const navigate = useNavigate();
   const start = () => navigate(user ? "/upload" : "/auth");
+  const scrollTo = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 
   return (
-    <div className="min-h-screen overflow-hidden">
+    <div className="reference-landing">
       <SiteHeader user={user} onSignOut={onSignOut} />
       <main id="main-content">
-        <section className="hero-section hero-editorial">
-          <div className="hero-grid site-container">
-            <div className="hero-copy-block">
-              <h1 className="hero-title">
-                See what this job is asking for.
+        <section className="reference-hero">
+          <div className="reference-container reference-hero-grid">
+            <div className="reference-hero-copy">
+              <span className="reference-badge">Scored against live postings</span>
+              <h1 className="reference-display">
+                Know your resume's score <span>before you apply</span>
               </h1>
-              <p className="hero-copy">
-                Upload your resume. We compare it with live postings and show
-                the few changes worth making before you apply.
+              <p className="reference-hero-subhead">
+                We compare your document with current postings for one role.
+                Four measured signals show what is already there and what is
+                worth changing before you apply.
               </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <button className="button button-primary h-12 px-6" onClick={start}>
-                  Analyse your resume
-                  <ArrowRight className="size-4" aria-hidden="true" />
+              <div className="reference-feature-list">
+                <span><Check />40 live postings sampled</span>
+                <span><Check />Four weighted components</span>
+                <span><Check />Results in seconds</span>
+              </div>
+              <div className="reference-hero-actions">
+                <button className="reference-button reference-button-primary" onClick={start}>
+                  Analyse my resume <span className="reference-button-icon"><ArrowRight /></span>
                 </button>
-                <button
-                  className="button button-secondary h-12 px-5"
-                  onClick={() =>
-                    document
-                      .getElementById("method")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                >
-                  See how it works
+                <button className="reference-button reference-button-ghost" onClick={() => scrollTo("methodologySection")}>
+                  How scoring works
                 </button>
               </div>
+              <p className="reference-fineprint">PDF or DOCX · up to 5MB</p>
             </div>
-            <HeroDocument />
+            <PreviewPanel />
           </div>
         </section>
 
-        <section className="problem-section">
-          <div className="site-container problem-layout">
-            <div>
-              <p className="section-kicker">The problem</p>
-              <h2 className="section-title mt-5 max-w-xl">
-                A good resume can still miss the job.
-              </h2>
-              <p className="section-copy mt-5 max-w-xl">
-                The issue is not effort. It is context. Generic advice gives
-                you more words, but it does not show you what this employer is
-                asking for now.
-              </p>
+        <section className="reference-section" id="methodologySection">
+          <div className="reference-container">
+            <header className="reference-section-heading">
+              <p className="reference-kicker">The method</p>
+              <h2 className="reference-display reference-section-title">Four checks. One readable report.</h2>
+              <p>Each signal is measured separately, then combined with a fixed formula. The model helps read your document. It does not invent the score.</p>
+            </header>
+            <div className="reference-method-intro">
+              <p><strong>Two different questions.</strong> The ATS Parse Score asks whether a parser can read your document at all. The Role Fit Score asks how well your experience matches this role in today's market. Parse score is one input to fit score, not a second total added on top.</p>
+              <p>Real applicant tracking systems are proprietary and configured differently by each employer. We do not claim to reproduce one. These checks reflect the parsing behaviour employers document most often.</p>
             </div>
-            <div className="problem-list">
-              <PainPoint
-                number="01"
-                title="A score without context"
-                body="A number tells you what is wrong, not why it matters to this employer or this role."
-              />
-              <PainPoint
-                number="02"
-                title="Advice that ignores the market"
-                body="A generic checklist cannot tell you what this job is asking for now."
-              />
-              <PainPoint
-                number="03"
-                title="A cleaner story with no evidence"
-                body="Adding words you have never used can make a resume polished and less true."
-              />
+            <div className="reference-method-grid">
+              {componentMeta.map((item) => <MethodCard key={item.key} item={item} />)}
             </div>
-          </div>
-        </section>
-
-        <section className="story-section">
-          <div className="site-container story-layout">
-            <div className="story-copy">
-              <p className="section-kicker">Why CareerStack</p>
-              <h2 className="section-title mt-5 max-w-2xl">
-                The useful work starts after the score.
-              </h2>
-              <p className="story-lede mt-6">
-                Most tools stop when they have a number. We built for the part
-                that comes next: deciding what to change without pretending to
-                be a recruiter, a parser, or a career coach.
-              </p>
-              <p className="story-body mt-5">
-                CareerStack keeps the scoring deterministic and the
-                recommendations grounded in your own experience. The goal is not
-                to make you look like everyone else. It is to make the signal
-                you already have easier to understand.
-              </p>
-              <div className="story-principles mt-9">
-                <StoryPrinciple
-                  title="Evidence before keywords"
-                  body="We map gaps to the work you can actually defend."
-                />
-                <StoryPrinciple
-                  title="One useful next move"
-                  body="We rank the few changes most likely to improve the application."
-                />
-              </div>
-            </div>
-            <figure className="story-figure">
-              <img
-                src="/career-workspace.jpg"
-                alt="A job seeker reviewing work on a laptop"
-                width="1400"
-                height="933"
-                loading="eager"
-              />
-              <figcaption>
-                <span>The principle we started with</span>
-                <strong>A score without evidence is just a feeling with a number attached.</strong>
-              </figcaption>
-            </figure>
-          </div>
-        </section>
-
-        <section className="why-section">
-          <div className="site-container">
-            <div className="why-heading">
-              <p className="section-kicker">The difference</p>
-              <h2 className="section-title mt-5 max-w-2xl">
-                Built to help you decide, not chase a number.
-              </h2>
-            </div>
-            <div className="comparison-grid mt-12">
-              <div className="comparison-column comparison-column-muted">
-                <p className="comparison-label">Most resume tools</p>
-                <ComparisonRow text="Give you a score" />
-                <ComparisonRow text="Suggest more keywords" />
-                <ComparisonRow text="Treat every role the same" />
-                <ComparisonRow text="Hide uncertainty" />
-              </div>
-              <div className="comparison-column comparison-column-accent">
-                <p className="comparison-label">CareerStack</p>
-                <ComparisonRow text="Show the evidence behind the score" strong />
-                <ComparisonRow text="Map gaps to real experience" strong />
-                <ComparisonRow text="Use the live market as context" strong />
-                <ComparisonRow text="Make limitations visible" strong />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="method" className="method-section">
-          <div className="site-container">
-            <div className="method-heading">
-              <p className="section-kicker">Transparent by design</p>
-              <h2 className="section-title mt-5 max-w-2xl">
-                You should be able to see the math.
-              </h2>
-              <p className="section-copy mt-5 max-w-2xl">
-                Four measured signals shape the result. A language model only
-                helps read your document and explain the evidence.
-              </p>
-            </div>
-            <div className="method-layout mt-12">
-              <div className="formula-panel">
-                <p>Role fit formula</p>
-                <div className="formula" aria-label="Role fit formula">
-                  <span>0.40 language</span>
-                  <span>0.25 evidence</span>
-                  <span>0.20 format</span>
-                  <span>0.15 experience</span>
-                </div>
-                <p className="formula-note">
-                  Scores reflect our published model. They do not reproduce a
-                  proprietary employer ATS.
-                </p>
-              </div>
-              <div className="method-list">
-                {componentMeta.map((item, index) => (
-                  <MethodRow key={item.key} item={item} index={index} />
+            <div className="reference-formula-wrap">
+              <div className="reference-formula">
+                <span>score</span> = {componentMeta.map((item, index) => (
+                  <span key={item.key}>{(item.weight / 100).toFixed(2)} · {item.label.toLowerCase()}{index < componentMeta.length - 1 ? " + " : ""}</span>
                 ))}
               </div>
             </div>
           </div>
         </section>
 
-        <section className="workflow-section">
-          <div className="site-container">
-            <h2 className="section-title max-w-2xl">
-              Four steps. No career-management system.
-            </h2>
-            <p className="section-copy mt-5 max-w-2xl">
-              Choose a role, understand the evidence, and make the next useful
-              edit without turning your search into a project management system.
-            </p>
-            <ol className="workflow-grid mt-12">
-              <WorkflowStep
-                number="01"
-                icon={<Upload />}
-                title="Add the document"
-                body="Upload a PDF or DOCX. We check that the file is readable before scoring it."
-              />
-              <WorkflowStep
-                number="02"
-                icon={<Target />}
-                title="Name the target"
-                body="Choose the role and location. The market profile is built around that search."
-              />
-              <WorkflowStep
-                number="03"
-                icon={<ScanLine />}
-                title="Read the evidence"
-                body="See where your experience already matches and where the document stays unclear."
-              />
-              <WorkflowStep
-                number="04"
-                icon={<FileSearch />}
-                title="Make the next edit"
-                body="Work the ranked actions, then compare your resume with relevant live roles."
-              />
-            </ol>
+        <section className="reference-story">
+          <div className="reference-container reference-story-grid">
+            <div className="reference-story-copy">
+              <p className="reference-kicker">Why it exists</p>
+              <h2 className="reference-display reference-section-title">A polished resume can still miss the role.</h2>
+              <p>Most advice adds more words. It does not help you decide which experience belongs in the first three lines, which skill needs proof, or which gap is worth closing before you apply.</p>
+              <p>CareerStack starts with the document and the market, then shows the difference in plain language. No invented experience. No black box. Just a better next edit.</p>
+              <div className="reference-story-notes">
+                <div><span>01</span><strong>Evidence before keywords</strong><p>Recommendations have to point back to something you can defend.</p></div>
+                <div><span>02</span><strong>One useful next move</strong><p>The report ranks changes instead of handing you a wall of advice.</p></div>
+              </div>
+            </div>
+            <aside className="reference-story-card">
+              <span className="reference-story-card-label">The question behind the score</span>
+              <strong>What should I change before this application goes out?</strong>
+              <div className="reference-story-card-footer"><span>CareerStack / 2026</span><span>Read the document. Then read the market.</span></div>
+            </aside>
           </div>
         </section>
 
-        <section className="integrity-section">
-          <div className="site-container integrity-layout">
-            <div className="integrity-copy">
-              <p className="section-kicker">A better kind of honest</p>
-              <h2 className="section-title max-w-xl">
-                Keep the document honest.
-              </h2>
-              <p className="section-copy mt-5 max-w-xl">
-                We use the file to produce your analysis and matching role view.
-                It is not used to train a model. The product also tells you when
-                a market sample is sparse or a provider description is partial.
-              </p>
-              <ul className="trust-list mt-7">
-                <li>
-                  <Check className="size-4" />
-                  Evidence recommendations stay grounded in your document
-                </li>
-                <li>
-                  <Check className="size-4" />
-                  Missing context is never treated as proof you did not provide
-                </li>
-                <li>
-                  <Check className="size-4" />
-                  Score limitations stay visible in the report
-                </li>
-              </ul>
+        <section className="reference-section reference-section-wash" id="workflow">
+          <div className="reference-container">
+            <header className="reference-section-heading">
+              <p className="reference-kicker">The inputs</p>
+              <h2 className="reference-display reference-section-title">The score follows the market.</h2>
+              <p>Postings are sampled at the moment you ask, so the comparison reflects the role as it is being advertised now.</p>
+            </header>
+            <div className="reference-data-steps">
+              <DataStep number="1" text="Search live postings for your role" />
+              <ChevronRight className="reference-data-arrow" aria-hidden="true" />
+              <DataStep number="2" text="Extract skills from each" />
+              <ChevronRight className="reference-data-arrow" aria-hidden="true" />
+              <DataStep number="3" text="Weight by frequency" />
             </div>
-            <div className="integrity-note">
-              <LockKeyhole className="size-5" />
-              <p>Private by default</p>
-              <span>Your document is used to help you make the next decision.</span>
-            </div>
+            <p className="reference-data-closing">Every requirement comes from a sampled posting. Nothing is pulled from a generic checklist.</p>
           </div>
         </section>
 
-        <section className="final-cta">
-          <div className="site-container final-cta-inner">
-            <h2 className="max-w-3xl font-display text-4xl leading-[1] tracking-[-0.05em] sm:text-6xl">
-              Ready to read your resume clearly?
-            </h2>
-            <button className="button button-accent h-12 px-6" onClick={start}>
-              Analyse your resume
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </button>
+        <section className="reference-trust-strip">
+          <div className="reference-container reference-trust-grid">
+            <div><ShieldCheck /><strong>Evidence first</strong><span>Recommendations stay grounded in your document.</span></div>
+            <div><Sparkles /><strong>Clear next move</strong><span>See what to change before you send the application.</span></div>
+            <div><Check /><strong>Private by default</strong><span>Your file is not used to train a model.</span></div>
           </div>
         </section>
       </main>
-      <footer className="site-footer">
-        <div className="site-container flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+      <footer className="reference-footer">
+        <div className="reference-container reference-footer-inner">
           <Brand />
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-            <Link to="/privacy" className="transition-colors hover:text-foreground">
-              Privacy
-            </Link>
-            <Link to="/terms" className="transition-colors hover:text-foreground">
-              Terms
-            </Link>
-            <span className="inline-flex items-center gap-1.5">
-              <LockKeyhole className="size-3.5" />
-              © 2026 CareerStack AI
-            </span>
-          </div>
+          <div><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><span>© 2026 CareerStack AI</span></div>
         </div>
       </footer>
     </div>
   );
 }
 
-function HeroDocument() {
+function PreviewPanel() {
   return (
-    <div className="hero-document-stage">
-      <div className="hero-document-stamp">CareerStack / Field note 01</div>
-      <figure className="hero-document-card">
-        <div className="hero-document-image-wrap">
-          <img
-            src="/resume-review.jpg"
-            alt="A printed resume beside a laptop"
-            width="1400"
-            height="933"
-          />
-          <div className="hero-document-overlay">
+    <div className="reference-preview-wrap">
+      <figure className="reference-document-card">
+        <div className="reference-document-media">
+          <img src="/resume-review.jpg" alt="A printed resume beside a laptop" width="1400" height="933" />
+          <div className="reference-document-overlay">
             <span>Read this first</span>
             <strong>What is already true?</strong>
             <small>Evidence, not keywords.</small>
           </div>
         </div>
-        <figcaption>
-          <span>One document. One target role.</span>
-          <span>Private by default.</span>
-        </figcaption>
+        <figcaption><span>One document. One target role.</span><span>Private by default.</span></figcaption>
       </figure>
-      <div className="hero-document-note">Read the document.<br />Then read the market.</div>
+      <div className="reference-report-card">
+        <div className="reference-report-top"><span>Role fit</span><strong>72</strong><em>Competitive</em></div>
+        <div className="reference-report-bars"><i /><i /><i /></div>
+        <p>One clear edit stands out. Start there.</p>
+      </div>
+      <span className="reference-preview-caption">A score is only useful when you can see the evidence behind it.</span>
     </div>
   );
 }
 
-function PainPoint({ number, title, body }: { number: string; title: string; body: string }) {
+function MethodCard({ item }: { item: (typeof componentMeta)[number] }) {
   return (
-    <article className="pain-point">
-      <span>{number}</span>
-      <div>
-        <h3>{title}</h3>
-        <p>{body}</p>
-      </div>
+    <article className="reference-method-card">
+      <strong>{Math.round(item.weight)}%</strong>
+      <h3>{item.label}</h3>
+      <p>{item.note}</p>
+      <p>{item.key === "format" ? "Nine deterministic checks for tables, columns, contact details, dates, bullets, and more." : item.key === "keyword" ? "How often the skills asked for across sampled postings actually appear in your resume." : item.key === "semantic" ? "Whether your wording supports the requirements in the role, sentence by sentence." : "How your experience and seniority compare with the market sample for this role."}</p>
     </article>
   );
 }
 
-function StoryPrinciple({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="story-principle">
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </div>
-  );
-}
-
-function ComparisonRow({ text, strong = false }: { text: string; strong?: boolean }) {
-  return (
-    <div className={strong ? "comparison-row comparison-row-strong" : "comparison-row"}>
-      {strong ? <Check className="size-4" /> : <span className="comparison-dash">/</span>}
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function MethodRow({ item, index }: { item: (typeof componentMeta)[number]; index: number }) {
-  return (
-    <article className="method-row">
-      <span className="method-index">0{index + 1}</span>
-      <div className="method-row-main">
-        <div className="flex items-baseline justify-between gap-4">
-          <h3>{item.label}</h3>
-          <span className="method-weight">{item.weight}%</span>
-        </div>
-        <p>{item.note}</p>
-        <div className="method-bar" aria-hidden="true">
-          <span style={{ width: `${item.weight * 2.1}%` }} />
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function WorkflowStep({ number, icon, title, body }: { number: string; icon: ReactNode; title: string; body: string }) {
-  return (
-    <li className="workflow-step">
-      <div className="flex items-center justify-between">
-        <span className="workflow-icon">{icon}</span>
-        <span className="workflow-number">{number}</span>
-      </div>
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </li>
-  );
+function DataStep({ number, text }: { number: string; text: string }) {
+  return <div className="reference-data-step"><span>{number}</span><strong>{text}</strong></div>;
 }

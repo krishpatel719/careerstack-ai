@@ -85,7 +85,7 @@ export function UploadPage({
   return (
     <div className="min-h-screen">
       <SiteHeader user={user} onSignOut={onSignOut} />
-      <main id="main-content" className="site-container upload-page">
+      <main id="main-content" className="site-container upload-page upload-reference-page">
         <div className="upload-intro">
           <p className="section-kicker">
             <span className="kicker-line" />
