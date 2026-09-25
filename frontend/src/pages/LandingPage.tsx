@@ -2,8 +2,6 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
-  ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Brand, SiteHeader } from "@/components/SiteChrome";
@@ -34,9 +32,9 @@ export function LandingPage({
                 Know your resume's score <span>before you apply</span>
               </h1>
               <p className="reference-hero-subhead">
-                We compare your document with current postings for one role.
-                Four measured signals show what is already there and what is
-                worth changing before you apply.
+                We mine live job postings for your target role and score your
+                resume across four measured components, not a guess. You get a
+                calculation you can inspect.
               </p>
               <div className="reference-feature-list">
                 <span><Check />40 live postings sampled</span>
@@ -61,12 +59,12 @@ export function LandingPage({
           <div className="reference-container">
             <header className="reference-section-heading">
               <p className="reference-kicker">The method</p>
-              <h2 className="reference-display reference-section-title">Four checks. One readable report.</h2>
-              <p>Each signal is measured separately, then combined with a fixed formula. The model helps read your document. It does not invent the score.</p>
+              <h2 className="reference-display reference-section-title">How the score is calculated</h2>
+              <p>Four components, each measured independently and combined by a fixed formula, never a model guessing a number.</p>
             </header>
             <div className="reference-method-intro">
-              <p><strong>Two different questions.</strong> The ATS Parse Score asks whether a parser can read your document at all. The Role Fit Score asks how well your experience matches this role in today's market. Parse score is one input to fit score, not a second total added on top.</p>
-              <p>Real applicant tracking systems are proprietary and configured differently by each employer. We do not claim to reproduce one. These checks reflect the parsing behaviour employers document most often.</p>
+              <p><strong>Two different questions.</strong> The ATS Parse Score asks whether a parser can read your document at all. The Role Fit Score asks how well your experience matches a specific role in today's market. Parse score is one input to fit score, 20% of its weight, not a separate total added on top.</p>
+              <p>Real applicant tracking systems are proprietary and vary by vendor and by how each employer configures them. We don't claim to reproduce any specific one. These checks reflect common, well-documented parsing behaviour.</p>
             </div>
             <div className="reference-method-grid">
               {componentMeta.map((item) => <MethodCard key={item.key} item={item} />)}
@@ -81,32 +79,12 @@ export function LandingPage({
           </div>
         </section>
 
-        <section className="reference-story">
-          <div className="reference-container reference-story-grid">
-            <div className="reference-story-copy">
-              <p className="reference-kicker">Why it exists</p>
-              <h2 className="reference-display reference-section-title">A polished resume can still miss the role.</h2>
-              <p>Most advice adds more words. It does not help you decide which experience belongs in the first three lines, which skill needs proof, or which gap is worth closing before you apply.</p>
-              <p>CareerStack starts with the document and the market, then shows the difference in plain language. No invented experience. No black box. Just a better next edit.</p>
-              <div className="reference-story-notes">
-                <div><span>01</span><strong>Evidence before keywords</strong><p>Recommendations have to point back to something you can defend.</p></div>
-                <div><span>02</span><strong>One useful next move</strong><p>The report ranks changes instead of handing you a wall of advice.</p></div>
-              </div>
-            </div>
-            <aside className="reference-story-card">
-              <span className="reference-story-card-label">The question behind the score</span>
-              <strong>What should I change before this application goes out?</strong>
-              <div className="reference-story-card-footer"><span>CareerStack / 2026</span><span>Read the document. Then read the market.</span></div>
-            </aside>
-          </div>
-        </section>
-
         <section className="reference-section reference-section-wash" id="workflow">
           <div className="reference-container">
             <header className="reference-section-heading">
               <p className="reference-kicker">The inputs</p>
-              <h2 className="reference-display reference-section-title">The score follows the market.</h2>
-              <p>Postings are sampled at the moment you ask, so the comparison reflects the role as it is being advertised now.</p>
+              <h2 className="reference-display reference-section-title">Where the requirements come from</h2>
+              <p>Every score is built on postings sampled at the moment you ask for it.</p>
             </header>
             <div className="reference-data-steps">
               <DataStep number="1" text="Search live postings for your role" />
@@ -115,15 +93,7 @@ export function LandingPage({
               <ChevronRight className="reference-data-arrow" aria-hidden="true" />
               <DataStep number="3" text="Weight by frequency" />
             </div>
-            <p className="reference-data-closing">Every requirement comes from a sampled posting. Nothing is pulled from a generic checklist.</p>
-          </div>
-        </section>
-
-        <section className="reference-trust-strip">
-          <div className="reference-container reference-trust-grid">
-            <div><ShieldCheck /><strong>Evidence first</strong><span>Recommendations stay grounded in your document.</span></div>
-            <div><Sparkles /><strong>Clear next move</strong><span>See what to change before you send the application.</span></div>
-            <div><Check /><strong>Private by default</strong><span>Your file is not used to train a model.</span></div>
+            <p className="reference-data-closing">Every requirement is measured from real postings, not a fixed rubric.</p>
           </div>
         </section>
       </main>
@@ -140,23 +110,25 @@ export function LandingPage({
 function PreviewPanel() {
   return (
     <div className="reference-preview-wrap">
-      <figure className="reference-document-card">
-        <div className="reference-document-media">
-          <img src="/resume-review.jpg" alt="A printed resume beside a laptop" width="1400" height="933" />
-          <div className="reference-document-overlay">
-            <span>Read this first</span>
-            <strong>What is already true?</strong>
-            <small>Evidence, not keywords.</small>
+      <div className="reference-browser-frame">
+        <div className="reference-browser-titlebar">
+          <div className="reference-browser-dots"><i /><i /><i /></div>
+          <div className="reference-browser-url">careerstack.ai/dashboard</div>
+        </div>
+        <div className="reference-browser-body">
+          <aside className="reference-preview-sidebar"><b /><b /><b /><b /></aside>
+          <div className="reference-preview-main">
+            <div className="reference-ring">
+              <svg viewBox="0 0 96 96" aria-hidden="true"><circle className="reference-ring-track" cx="48" cy="48" r="41" /><circle className="reference-ring-fill" cx="48" cy="48" r="41" /></svg>
+              <strong>72</strong>
+            </div>
+            <span className="reference-band">Competitive</span>
+            <div className="reference-mini-bars"><i /><i /><i /></div>
+            <div className="reference-mini-labels"><span>Role fit</span><span>Market language</span><span>Evidence quality</span></div>
           </div>
         </div>
-        <figcaption><span>One document. One target role.</span><span>Private by default.</span></figcaption>
-      </figure>
-      <div className="reference-report-card">
-        <div className="reference-report-top"><span>Role fit</span><strong>72</strong><em>Competitive</em></div>
-        <div className="reference-report-bars"><i /><i /><i /></div>
-        <p>One clear edit stands out. Start there.</p>
       </div>
-      <span className="reference-preview-caption">A score is only useful when you can see the evidence behind it.</span>
+      <span className="reference-preview-caption">A useful score comes with the evidence behind it.</span>
     </div>
   );
 }

@@ -372,7 +372,26 @@ export function WorkspaceShell({
           </div>
         </div>
       </header>
-      <div className="site-container flex min-h-14 items-center gap-1 overflow-x-auto border-b border-border/70">
+      <aside className="workspace-sidebar" aria-label="Workspace navigation">
+        <div className="workspace-sidebar-brand"><Brand /></div>
+        <div className="workspace-sidebar-group">
+          <p>Analysis</p>
+          <Link to="/app" className={cn("workspace-sidebar-link", location.pathname === "/app" && "active")} aria-current={location.pathname === "/app" ? "page" : undefined}><LayoutDashboard className="size-4" />Overview</Link>
+          <Link to="/app/jobs" className={cn("workspace-sidebar-link", location.pathname === "/app/jobs" && "active")} aria-current={location.pathname === "/app/jobs" ? "page" : undefined}><BriefcaseBusiness className="size-4" />Matching roles</Link>
+          <Link to="/app/jobs/map" className={cn("workspace-sidebar-link", location.pathname === "/app/jobs/map" && "active")} aria-current={location.pathname === "/app/jobs/map" ? "page" : undefined}><MapPinned className="size-4" />Job map</Link>
+        </div>
+        <div className="workspace-sidebar-group">
+          <p>About</p>
+          <Link to="/#methodologySection" className="workspace-sidebar-link"><FileText className="size-4" />How scoring works</Link>
+          <Link to="/account" className={cn("workspace-sidebar-link", location.pathname === "/account" && "active")} aria-current={location.pathname === "/account" ? "page" : undefined}><Settings2 className="size-4" />Account</Link>
+          <button type="button" className="workspace-sidebar-link" onClick={() => navigate("/upload")}><Plus className="size-4" />New analysis</button>
+        </div>
+        <div className="workspace-sidebar-bottom">
+          <span>{user.name}</span>
+          <button type="button" onClick={onSignOut}>Sign out</button>
+        </div>
+      </aside>
+      <div className="workspace-nav-strip site-container flex min-h-14 items-center gap-1 overflow-x-auto border-b border-border/70">
         {nav.map((item) => {
           const active = location.pathname === item.to;
           return (

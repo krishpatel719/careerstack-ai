@@ -131,6 +131,14 @@ def test_mongodb_reserved_id_cannot_be_overwritten_by_service_data(mongo_backend
         save_json("users", "key", {"_id": "attacker-controlled", "email": "a@example.com"})
 
 
+def test_ensure_indexes_accepts_a_database_without_truth_value_testing(monkeypatch, mongo_backend):
+    def unexpected_fallback():
+        raise AssertionError("ensure_indexes must not call get_database when a database is supplied")
+
+    monkeypatch.setattr(database, "get_database", unexpected_fallback)
+    database.ensure_indexes(mongo_backend)
+
+
 def test_mongodb_indexes_match_runtime_access_and_expiry_paths(mongo_backend):
     database.ensure_indexes(mongo_backend)
 
