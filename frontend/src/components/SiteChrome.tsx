@@ -46,10 +46,21 @@ export function SiteHeader({
 }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
-  function goToMethod() {
+  useEffect(() => {
+    if (location.pathname !== "/" || !location.hash) return;
+    const target = document.getElementById(location.hash.slice(1));
+    if (!target) return;
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.pathname, location.hash]);
+
+  function goToSection(section: string) {
     setOpen(false);
-    navigate("/#method");
+    navigate(`/#${section}`);
   }
 
   return (
@@ -60,10 +71,10 @@ export function SiteHeader({
           className="hidden items-center gap-7 md:flex"
           aria-label="Primary navigation"
         >
-          <button className="nav-link" onClick={goToMethod}>
+          <button className="nav-link" onClick={() => goToSection("workflow")}>
             How it works
           </button>
-          <button className="nav-link" onClick={goToMethod}>
+          <button className="nav-link" onClick={() => goToSection("methodologySection")}>
             Scoring method
           </button>
           <span className="nav-divider" aria-hidden="true" />
@@ -112,8 +123,11 @@ export function SiteHeader({
               className="site-container flex flex-col gap-1 py-4"
               aria-label="Mobile navigation"
             >
-              <button className="mobile-nav-link" onClick={goToMethod}>
+              <button className="mobile-nav-link" onClick={() => goToSection("workflow")}>
                 How it works
+              </button>
+              <button className="mobile-nav-link" onClick={() => goToSection("methodologySection")}>
+                Scoring method
               </button>
               <button
                 className="mobile-nav-link"
