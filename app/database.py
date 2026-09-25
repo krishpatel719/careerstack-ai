@@ -153,7 +153,10 @@ def get_database() -> Database:
 
 def ensure_indexes(database: Database | None = None) -> None:
     """Create the query and TTL indexes used by the application."""
-    db = database or get_database()
+    # PyMongo Database objects intentionally do not implement truth-value
+    # testing. Use an explicit None check so a real Database can be passed
+    # directly without invoking bool(database).
+    db = get_database() if database is None else database
     for collection_name, indexes in INDEXES.items():
         collection = db[collection_name]
         for fields, options in indexes:
