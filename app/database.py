@@ -19,18 +19,18 @@ JOB_SOURCE_CACHE_TTL_SECONDS = 6 * 60 * 60
 # Every index maps to a real access path in the service layer. TTL indexes
 # mirror the freshness checks in roleprofile/cache.py and discovery.py, so an
 # expired document disappears even if the process is not running at expiry.
-INDEXES: dict[str, list[tuple[str, dict]]] = {
+# field-or-compound-key-spec -> create_index kwargs. The key is either a
+# single field name or a list of (field, direction) pairs; PyMongo has no
+# separate "sort" option, so a compound index must be expressed here.
+INDEXES: dict[str, list[tuple[str | list[tuple[str, int | str]], dict]]] = {
     "users": [
         ("user_id", {"unique": True, "name": "users_user_id_unique"}),
         ("email", {"unique": True, "name": "users_email_unique"}),
     ],
     "analyses": [
         (
-            "user_id",
-            {
-                "name": "analyses_user_created",
-                "sort": {"user_id": ASCENDING, "created_at": DESCENDING},
-            },
+            [("user_id", ASCENDING), ("created_at", DESCENDING)],
+            {"name": "analyses_user_created"},
         ),
         ("resume_file_key", {"name": "analyses_resume_file_key"}),
     ],
@@ -54,23 +54,17 @@ INDEXES: dict[str, list[tuple[str, dict]]] = {
     ],
     "discovery_runs": [
         (
-            "user_id",
-            {
-                "name": "discovery_runs_user_created",
-                "sort": {"user_id": ASCENDING, "created_at": DESCENDING},
-            },
+            [("user_id", ASCENDING), ("created_at", DESCENDING)],
+            {"name": "discovery_runs_user_created"},
         ),
         ("analysis_id", {"name": "discovery_runs_analysis_id"}),
         (
-            "target.role",
-            {
-                "name": "discovery_runs_cached_lookup",
-                "sort": {
-                    "target.role": ASCENDING,
-                    "target.location": ASCENDING,
-                    "created_at": DESCENDING,
-                },
-            },
+            [
+                ("target.role", ASCENDING),
+                ("target.location", ASCENDING),
+                ("created_at", DESCENDING),
+            ],
+            {"name": "discovery_runs_cached_lookup"},
         ),
     ],
     "api_quota": [
@@ -88,30 +82,29 @@ INDEXES: dict[str, list[tuple[str, dict]]] = {
             },
         ),
         (
-            "geo",
-            {
-                "name": "job_map_jobs_geo",
-                "type": GEOSPHERE,
-                "partialFilterExpression": {"geo": {"$exists": True}},
-            },
+            # GEOSPHERE belongs in the key spec, not the options. Passing it
+            # as a "type" kwarg sends an unknown index option to the server,
+            # which Atlas rejects outright.
+            # No partialFilterExpression: MongoDB refuses to use a partial
+            # index for $geoNear/$nearSphere, so radius search fails with
+            # "unable to find index for $geoNear query" even though the
+            # index exists -- verified against Atlas with 548 coordinate-
+            # bearing jobs present. It was redundant regardless, since a
+            # 2dsphere index already skips documents with no geo field.
+            [("geo", GEOSPHERE)],
+            {"name": "job_map_jobs_geo"},
         ),
         (
-            "last_seen_at",
-            {"name": "job_map_jobs_recent", "sort": {"last_seen_at": DESCENDING}},
+            [("last_seen_at", DESCENDING)],
+            {"name": "job_map_jobs_recent"},
         ),
         (
-            "company_key",
-            {
-                "name": "job_map_jobs_company_recent",
-                "sort": {"company_key": ASCENDING, "last_seen_at": DESCENDING},
-            },
+            [("company_key", ASCENDING), ("last_seen_at", DESCENDING)],
+            {"name": "job_map_jobs_company_recent"},
         ),
         (
-            "location_key",
-            {
-                "name": "job_map_jobs_location_recent",
-                "sort": {"location_key": ASCENDING, "last_seen_at": DESCENDING},
-            },
+            [("location_key", ASCENDING), ("last_seen_at", DESCENDING)],
+            {"name": "job_map_jobs_location_recent"},
         ),
     ],
     "job_map_job_sources": [
@@ -123,8 +116,8 @@ INDEXES: dict[str, list[tuple[str, dict]]] = {
     ],
     "job_map_runs": [
         (
-            "completed_at",
-            {"name": "job_map_runs_recent", "sort": {"completed_at": DESCENDING}},
+            [("completed_at", DESCENDING)],
+            {"name": "job_map_runs_recent"},
         ),
     ],
     "job_map_ingestion_locks": [

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -174,9 +174,22 @@ app.include_router(account_router)
 
 
 @app.exception_handler(404)
-async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Return an actionable response for mistyped API routes."""
-    if request.url.path == "/api" or request.url.path.startswith("/api/"):
+async def not_found_handler(request: Request, exc: Exception) -> Response:
+    """Return an actionable response for mistyped API routes, and serve the
+    React shell for client-side routes.
+
+    The frontend is a single-page app: React Router owns /upload, /auth,
+    /app/jobs/map and the rest, and those paths have no server route. They
+    work while navigating inside the app, but a refresh, a bookmark or a
+    shared link is a fresh GET the server has never heard of -- without
+    this fallback the user gets raw JSON instead of the product.
+
+    /api/* keeps the JSON 404: an unknown API path is a real error, and
+    answering it with an HTML page would turn a clear mistake into a
+    confusing one for anyone calling the API.
+    """
+    path = request.url.path
+    if path == "/api" or path.startswith("/api/"):
         return JSONResponse(
             status_code=404,
             content={
@@ -186,6 +199,21 @@ async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
                 )
             },
         )
+
+    # Only extensionless paths are client-side routes. A request carrying a
+    # file extension is asking for a file, so it must keep 404ing:
+    #
+    #   - /assets/missing.js would otherwise be handed HTML where the
+    #     browser expects JavaScript, failing later and less clearly.
+    #   - /index_v1.html.bak must stay a hard 404 rather than resolving to
+    #     the live app, which would mask whether a stray backup is exposed.
+    #     tests/test_main.py asserts exactly that.
+    last_segment = path.rsplit("/", 1)[-1]
+    looks_like_a_file = "." in last_segment
+
+    if not looks_like_a_file and REACT_INDEX.exists():
+        return FileResponse(REACT_INDEX, media_type="text/html", status_code=200)
+
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 

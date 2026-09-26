@@ -228,3 +228,51 @@ def test_analyze_returns_422_for_a_blank_page_pdf():
     detail = response.json()["detail"]
     assert "couldn't find any selectable text" in detail
     assert "export a text-based PDF" in detail
+
+
+# --------------------------------------------------------------------------
+# Single-page-app fallback
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/upload", "/auth", "/account", "/app", "/app/jobs", "/app/jobs/map", "/privacy", "/terms"],
+)
+def test_client_side_routes_serve_the_react_shell(path):
+    """React Router owns these paths and the server has no route for them.
+    They work while navigating inside the app, but a refresh, a bookmark or
+    a shared link is a fresh GET -- without the fallback the user gets raw
+    JSON instead of the product.
+    """
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<!doctype html" in response.text.lower()
+
+
+@pytest.mark.parametrize("path", ["/api", "/api/does-not-exist", "/api/discovery/nope/nope"])
+def test_unknown_api_routes_still_return_json_not_the_app(path):
+    """An unknown API path is a real error. Answering it with an HTML page
+    would turn a clear mistake into a confusing one for an API caller.
+    """
+    response = client.get(path)
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    assert "detail" in response.json()
+
+
+@pytest.mark.parametrize("path", ["/assets/missing.js", "/missing.css", "/robots.txt.bak"])
+def test_paths_that_look_like_files_still_404(path):
+    """A request carrying a file extension is asking for a file, not a
+    client-side route. Serving index.html for /assets/missing.js would hand
+    the browser HTML where it expects JavaScript, failing later and less
+    clearly -- and a stray backup must stay a hard 404, not resolve to the
+    live app.
+    """
+    response = client.get(path)
+
+    assert response.status_code == 404
+    assert "<!doctype html" not in response.text.lower()

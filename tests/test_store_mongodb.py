@@ -158,7 +158,12 @@ def test_mongodb_indexes_match_runtime_access_and_expiry_paths(mongo_backend):
     assert source_indexes["job_source_cache_expiry"]["expireAfterSeconds"] == 6 * 60 * 60
     assert "discovery_runs_cached_lookup" in run_indexes
     assert quota_indexes["api_quota_source_period_unique"]["unique"] is True
-    assert map_indexes["job_map_jobs_geo"]["key"] == [("geo", 1)]
+    # 2dsphere, not 1: an ascending index cannot serve $near/$geoWithin at
+    # all. This previously asserted [("geo", 1)] because GEOSPHERE was being
+    # passed as a "type" option, which PyMongo forwards as an unknown index
+    # option -- Atlas rejects it outright, so the index was never created on
+    # a real cluster.
+    assert map_indexes["job_map_jobs_geo"]["key"] == [("geo", "2dsphere")]
     assert map_indexes["job_map_jobs_expiry"]["expireAfterSeconds"] == 0
     assert map_source_indexes["job_map_source_key_unique"]["unique"] is True
 
