@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   Check,
   ChevronRight,
 } from "lucide-react";
@@ -43,7 +42,7 @@ export function LandingPage({
               </div>
               <div className="reference-hero-actions">
                 <button className="reference-button reference-button-primary" onClick={start}>
-                  Analyse my resume <span className="reference-button-icon"><ArrowRight /></span>
+                  Analyse my resume
                 </button>
                 <button className="reference-button reference-button-ghost" onClick={() => scrollTo("methodologySection")}>
                   How scoring works
@@ -128,7 +127,6 @@ function PreviewPanel() {
           </div>
         </div>
       </div>
-      <span className="reference-preview-caption">A useful score comes with the evidence behind it.</span>
     </div>
   );
 }

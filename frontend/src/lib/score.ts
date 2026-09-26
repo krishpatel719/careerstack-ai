@@ -61,6 +61,17 @@ export function getSavedAnalysis(): Analysis | null {
   }
 }
 
+/** Persist the analysis the dashboard is showing, so opening one from
+    History survives a reload the same way a fresh analysis does. */
+export function saveAnalysis(analysis: Analysis) {
+  try {
+    sessionStorage.setItem("careerstack_analysis", JSON.stringify(analysis));
+  } catch {
+    // Private-mode storage or a quota limit: the page still renders from
+    // component state, it just will not survive a reload.
+  }
+}
+
 export function formatActionType(value: string) {
   return value.replaceAll("_", " ");
 }

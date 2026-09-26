@@ -45,7 +45,20 @@ export type Analysis = {
       effort?: string;
       estimated_gain?: number;
       quantified?: boolean;
-      detail?: Record<string, unknown>;
+      /** Shape varies by `type`; ats.py emits exactly these fields per
+          kind, which is what the dashboard's evidence panels render. */
+      detail?: {
+        // missing_skill
+        skill?: string;
+        count?: number;
+        // format_issue
+        check?: string;
+        message?: string;
+        penalty?: number;
+        // weak_evidence
+        requirement?: string;
+        evidence_strength?: number;
+      };
     }>;
   };
   role_profile_meta?: {
@@ -63,6 +76,9 @@ export type Analysis = {
   };
   degraded?: boolean;
   degraded_message?: string | null;
+  /** Only present on /api/analyses summary rows: format_detail.score
+      rescaled to 0-100, so history can show both scores as pills. */
+  parse_score?: number | null;
 };
 
 export type OpportunitySearch = {
