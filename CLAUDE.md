@@ -221,6 +221,35 @@ that text. Greenhouse, Lever, and Ashby are first-party company ATS sources
 for their configured boards, so their links and descriptions are authoritative
 for those employers. Within a source, the fullest description wins.
 
+**Lever and Ashby board tokens are populated.** Both shipped as empty
+placeholder files. 84 Lever and 39 Ashby candidates were probed against
+their public APIs; the shipped lists are only the boards that returned 200
+*and* carry India roles — 5 Lever (Paytm, Meesho, Zeta, MindTickle, CRED)
+and 4 Ashby (OpenAI, ClickHouse, Atlan, Replit). Boards that resolve but
+list nothing for India are deliberately omitted: each configured token
+costs one request per discovery run.
+
+Two bugs had to be fixed before either source returned anything:
+
+- **Country-less locations.** Lever writes `"Noida, Uttar Pradesh"` with no
+  country, while Greenhouse and Ashby write `"Bengaluru, India"`. The
+  country-wide check tested for the literal substring `"india"`, so every
+  genuine Indian Lever posting was discarded — Paytm returned 174 jobs and
+  contributed 0. `public_ats._is_india_located` now also recognises Indian
+  cities and states.
+- **Cap applied before role filtering.** Adapters fetched a whole board,
+  truncated to `limit`, and left role filtering to discovery. On Paytm's
+  alphabetical board the cap was spent on "Accounts Payable Specialist" and
+  "Area Collection Manager" entries before reaching any of its 8
+  engineering roles. Adapters now sort role matches ahead of the rest
+  before truncating.
+
+**Coverage is role-dependent, and that is not a fault.** No Lever board
+carries a single "full stack" title, so that role legitimately returns 0
+from Lever while `software engineer` returns 200. Measured for
+`software engineer` / India: adzuna 150, greenhouse 200, lever 200,
+ashby 25 — 575 total against 125 before these fixes.
+
 **Greenhouse tokens must be verified, not assumed.** The list originally
 specified (razorpay, phonepe, zerodha, cred, meesho, postman, freshworks,
 ...) was 14/15 dead -- only `groww` resolved, and Razorpay exists only as
