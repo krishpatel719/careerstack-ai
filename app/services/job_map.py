@@ -326,10 +326,14 @@ async def ingest_targets(
             role = str(target["role"]).strip()
             location = str(target["location"]).strip()
             queries = generate_queries(role, ParsedResume())
-            raw_postings, counts, target_fetched = await discovery._gather_sources(
+            # _gather_sources returns (postings, per-source counts) -- two
+            # values, not three. The raw fetched count is just how many
+            # postings came back before dedupe, so derive it here rather
+            # than widening a signature that discovery.py also depends on.
+            raw_postings, counts = await discovery._gather_sources(
                 role, queries, location
             )
-            fetched += target_fetched
+            fetched += len(raw_postings)
             for source, count in counts.items():
                 source_counts[source] = source_counts.get(source, 0) + count
 

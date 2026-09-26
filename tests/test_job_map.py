@@ -106,7 +106,11 @@ def test_ingestion_persists_a_provider_free_searchable_snapshot(monkeypatch):
                 location="Pune, Maharashtra",
             ),
         ]
-        return postings, {"greenhouse": 2, "jsearch": 1}, 3
+        # Two values, matching discovery._gather_sources: (postings, counts).
+        # This previously returned a third "fetched" count that the real
+        # function does not produce, so the stub disagreed with production
+        # and ingestion crashed on the live path while the test passed.
+        return postings, {"greenhouse": 2, "jsearch": 1}
 
     monkeypatch.setattr(job_map.discovery, "_gather_sources", fake_sources)
 
