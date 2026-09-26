@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 SOURCE_NAME = "jsearch"
 SOURCE_LABEL = "via JSearch"
 
+# The subscribed listing is "JSearch by OpenWeb Ninja", whose search route
+# is NOT /search: that path 404s ("Endpoint '/search' does not exist") while
+# /job-details, /estimated-salary and /company-job-salary all answer 200 on
+# the same key. So the key, the host, the subscription (BASIC, Active) and
+# the quota (191 of 200 left) are all fine -- only this path is wrong.
+#
+# Verified not to be: a bad key (two different keys behave identically), a
+# quota breach (that returns 429, not 404), a missing subscription (other
+# hosts return 403 "not subscribed"; this one returns 404, which is what a
+# *subscribed* API says about a route it does not serve), or header casing,
+# trailing slashes and a missing Host header.
+#
+# Correct it from the RapidAPI console: open the Job Search endpoint, read
+# the URL on the Request tab, and put that path here. Until then JSearch
+# contributes nothing and discovery runs on the other four sources.
 BASE_URL = "https://jsearch.p.rapidapi.com/search"
 API_HOST = "jsearch.p.rapidapi.com"
 REQUEST_TIMEOUT_SECONDS = 30.0

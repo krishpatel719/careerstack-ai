@@ -1,4 +1,26 @@
 {
-  "_comment": "Add only Ashby board tokens whose public API use and terms have been reviewed. Set enabled to false to pause a board without deleting it.",
-  "companies": []
+  "_comment": [
+    "Ashby board tokens, each verified to return HTTP 200 from",
+    "https://api.ashbyhq.com/posting-api/job-board/{token} on 2026-09-26.",
+    "",
+    "39 candidates were probed and 20 resolved, but most carry no India",
+    "roles at all. Only the four with India-located postings are shipped:",
+    "a board that returns nothing for this market still costs a request on",
+    "every discovery run.",
+    "",
+    "Ashby is the thinnest of the configured sources for India -- 26 India",
+    "jobs across every valid board, against 231 from Lever. It is kept",
+    "because these are first-party company boards, so when one of them does",
+    "list an India role the posting and its link are authoritative.",
+    "",
+    "Only add a board whose public API use and terms have been reviewed.",
+    "Set enabled to false to pause one without deleting it."
+  ],
+  "verified_at": "2026-09-26",
+  "companies": [
+    { "token": "openai", "name": "OpenAI", "enabled": true, "india_jobs_at_verification": 10 },
+    { "token": "clickhouse", "name": "ClickHouse", "enabled": true, "india_jobs_at_verification": 9 },
+    { "token": "atlan", "name": "Atlan", "enabled": true, "india_jobs_at_verification": 6 },
+    { "token": "replit", "name": "Replit", "enabled": true, "india_jobs_at_verification": 1 }
+  ]
 }

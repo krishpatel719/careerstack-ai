@@ -1,4 +1,25 @@
 {
-  "_comment": "Add only Lever board tokens whose public API use and terms have been reviewed. Set enabled to false to pause a board without deleting it.",
-  "companies": []
+  "_comment": [
+    "Lever board tokens, each verified to return HTTP 200 with a JSON array",
+    "from https://api.lever.co/v0/postings/{token} on 2026-09-26.",
+    "",
+    "84 candidate tokens were probed; only these returned a valid board with",
+    "India-located roles. Spotify and a few other global boards resolve but",
+    "carry no India postings, so they are omitted rather than shipped as",
+    "dead weight -- every configured token costs one request per run.",
+    "",
+    "Only add a board whose public API use and terms have been reviewed.",
+    "Set enabled to false to pause one without deleting it.",
+    "",
+    "Re-verify with scripts/verify_public_ats.py before a demo: a renamed",
+    "board 404s silently and only costs coverage."
+  ],
+  "verified_at": "2026-09-26",
+  "companies": [
+    { "token": "paytm", "name": "Paytm", "enabled": true, "india_jobs_at_verification": 132 },
+    { "token": "meesho", "name": "Meesho", "enabled": true, "india_jobs_at_verification": 51 },
+    { "token": "zeta", "name": "Zeta", "enabled": true, "india_jobs_at_verification": 20 },
+    { "token": "mindtickle", "name": "MindTickle", "enabled": true, "india_jobs_at_verification": 17 },
+    { "token": "cred", "name": "CRED", "enabled": true, "india_jobs_at_verification": 11 }
+  ]
 }

@@ -27,6 +27,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.services.jobs.base import id_or_none, raw_posting, text_or_none
+from app.services.roleprofile.miner import posting_matches_role
 
 logger = logging.getLogger(__name__)
 
@@ -256,4 +257,11 @@ async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
         else:
             logger.warning("Greenhouse board %r returned a malformed result", token)
 
+    # Role-relevant postings first, so `limit` cannot be exhausted by
+    # unrelated roles on a large alphabetical board before the engineering
+    # jobs are reached. Measured: Paytm's Lever board returns 174 postings
+    # beginning with "Accounts Payable Specialist", and all 8 of its
+    # engineering roles sat past the cap, so this source contributed 0.
+    # Order within each group is preserved.
+    collected.sort(key=lambda posting: not posting_matches_role(posting, role))
     return collected[:limit]

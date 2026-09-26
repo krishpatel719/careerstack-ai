@@ -41,6 +41,49 @@ _CITY_ALIASES = {
 }
 _COUNTRY_WIDE = {"india", "in", "anywhere", ""}
 
+# Indian places used to recognise a posting as India-located when the
+# provider omits the country. Greenhouse and Ashby write "Bengaluru,
+# India" or plain "India", so a substring check for "india" is enough for
+# them -- but Lever writes "Noida, Uttar Pradesh" and "Mumbai,
+# Maharashtra" with no country at all. Matching only the literal word
+# therefore discarded every genuine Indian Lever posting: Paytm returned
+# 174 jobs and contributed 0.
+#
+# States are included because a city list alone still misses smaller
+# locations ("Vizag, Andhra Pradesh"). Matched on whole words so "pune"
+# cannot fire inside an unrelated longer word.
+_INDIA_PLACES = frozenset({
+    # Metros and major tech hubs
+    "bangalore", "bengaluru", "mumbai", "bombay", "delhi", "new delhi", "ncr",
+    "gurgaon", "gurugram", "noida", "greater noida", "hyderabad", "chennai",
+    "madras", "pune", "poona", "kolkata", "calcutta", "ahmedabad", "surat",
+    "jaipur", "lucknow", "kanpur", "nagpur", "indore", "bhopal", "patna",
+    "vadodara", "coimbatore", "kochi", "cochin", "trivandrum",
+    "thiruvananthapuram", "chandigarh", "mysore", "mysuru", "visakhapatnam",
+    "vizag", "bhubaneswar", "guwahati", "rajkot", "nashik", "ludhiana",
+    # States and union territories
+    "andhra pradesh", "arunachal pradesh", "assam", "bihar", "chhattisgarh",
+    "goa", "gujarat", "haryana", "himachal pradesh", "jharkhand", "karnataka",
+    "kerala", "madhya pradesh", "maharashtra", "manipur", "meghalaya",
+    "mizoram", "nagaland", "odisha", "orissa", "punjab", "rajasthan", "sikkim",
+    "tamil nadu", "telangana", "tripura", "uttar pradesh", "uttarakhand",
+    "west bengal", "puducherry", "pondicherry",
+})
+
+
+def _is_india_located(haystack: str) -> bool:
+    """Whether a free-text ATS location denotes somewhere in India.
+
+    Checks the country word first, then falls back to recognising an
+    Indian city or state for providers that omit the country entirely.
+    """
+    if "india" in haystack:
+        return True
+    return any(
+        re.search(rf"(?<![a-z]){re.escape(place)}(?![a-z])", haystack)
+        for place in _INDIA_PLACES
+    )
+
 
 def load_company_tokens(data_file: Path) -> list[str]:
     """Load enabled ATS board tokens from a curated local JSON file.
@@ -118,7 +161,7 @@ def matches_location(job_location: object, wanted: str) -> bool:
     wanted_normalised = (wanted or "").strip().lower()
     haystack = job_location.lower() if isinstance(job_location, str) else ""
     if wanted_normalised in _COUNTRY_WIDE:
-        return "india" in haystack
+        return _is_india_located(haystack)
     terms = _CITY_ALIASES.get(wanted_normalised, [wanted_normalised])
     return any(term and term in haystack for term in terms)
 

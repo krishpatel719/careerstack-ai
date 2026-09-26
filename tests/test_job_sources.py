@@ -592,7 +592,11 @@ async def test_greenhouse_skips_malformed_items_and_nested_fields(monkeypatch):
     postings = await greenhouse.fetch("backend developer", "Pune")
 
     assert len(postings) == 2
-    malformed_result, valid_result = postings
+    # Looked up by id rather than position: adapters now sort
+    # role-matching postings ahead of the rest, so the valid "Backend
+    # Engineer" leads and the title-less malformed entry follows.
+    valid_result = next(p for p in postings if p["id"] == "greenhouse-valid")
+    malformed_result = next(p for p in postings if p["id"] is None)
     assert malformed_result["source"] == "greenhouse"
     assert malformed_result["id"] is None
     assert malformed_result["title"] is None
@@ -868,13 +872,24 @@ async def test_missing_rapidapi_key_does_not_break_the_run(monkeypatch):
     async def fake_greenhouse(role, location, limit=200):
         return [_src_posting("greenhouse", company="G1")]
 
+    # Every source the fan-out touches must be stubbed, not just the ones
+    # under test. Lever and Ashby were previously left live: the test
+    # passed only because their board files shipped empty, so the moment
+    # real boards were configured this made genuine network calls and
+    # returned 227 postings instead of 2.
+    async def fake_empty(role, location, limit=200):
+        return []
+
     monkeypatch.setattr(discovery.adzuna_source, "fetch", fake_adzuna)
     monkeypatch.setattr(discovery.greenhouse, "fetch", fake_greenhouse)
+    monkeypatch.setattr(discovery.lever, "fetch", fake_empty)
+    monkeypatch.setattr(discovery.ashby, "fetch", fake_empty)
 
     postings, counts = await discovery._gather_sources("role", ["role"], "India")
 
     assert counts["jsearch"] == 0
     assert counts["adzuna"] == 1 and counts["greenhouse"] == 1
+    assert counts["lever"] == 0 and counts["ashby"] == 0
     assert len(postings) == 2
 
 

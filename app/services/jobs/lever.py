@@ -24,6 +24,7 @@ from app.services.jobs.public_ats import (
     matches_location,
     posting_list,
 )
+from app.services.roleprofile.miner import posting_matches_role
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +120,6 @@ async def _fetch_one(
 
 async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
     """Fetch enabled Lever boards matching the requested location.
-
-    `role` is intentionally unused. Lever boards are small enough to fetch
-    whole, and discovery ranks the resulting descriptions against the role.
     """
     tokens = load_company_tokens()
     if not tokens:
@@ -141,4 +139,11 @@ async def fetch(role: str, location: str, limit: int = 200) -> list[dict]:
             continue
         collected.extend(result)
 
+    # Role-relevant postings first, so `limit` cannot be exhausted by
+    # unrelated roles on a large alphabetical board before the engineering
+    # jobs are reached. Measured: Paytm's Lever board returns 174 postings
+    # beginning with "Accounts Payable Specialist", and all 8 of its
+    # engineering roles sat past the cap, so this source contributed 0.
+    # Order within each group is preserved.
+    collected.sort(key=lambda posting: not posting_matches_role(posting, role))
     return collected[:limit]
